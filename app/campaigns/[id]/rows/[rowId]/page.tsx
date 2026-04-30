@@ -1,0 +1,1 @@
+export default function RowDetail(){return <main className='p-8'><h1 className='text-2xl font-bold mb-4'>Row Detail</h1><div className='grid md:grid-cols-2 gap-4'><div className='bg-white border rounded p-4'>Original + validation + strategy</div><div className='bg-white border rounded p-4'>Draft + QA + final output + revisions</div></div></main>}

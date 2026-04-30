@@ -1,0 +1,1 @@
+export default function Knowledge(){return <main className='p-8'><h1 className='text-2xl font-bold mb-4'>Knowledge Base</h1><div className='bg-white border rounded p-4'>Manage facts, banned phrases, tone and CTA preferences.</div></main>}
