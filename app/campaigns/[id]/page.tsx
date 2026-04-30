@@ -1,0 +1,1 @@
+export default function CampaignDetail(){return <main className='p-8'><h1 className='text-2xl font-bold mb-4'>Campaign Detail</h1><div className='bg-white border rounded p-4'>Rows table, status filters, and bulk actions placeholders.</div></main>}

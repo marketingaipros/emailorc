@@ -1,0 +1,1 @@
+export default function LoginPage(){return <main className='p-8 max-w-md mx-auto'><h1 className='text-2xl font-bold mb-4'>Login</h1><div className='border rounded p-4 bg-white'>Auth provider placeholder (Clerk/Auth.js)</div></main>}
