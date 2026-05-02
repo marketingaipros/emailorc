@@ -1,0 +1,1 @@
+import Link from 'next/link'; export default function Campaigns(){return <main className='p-8'><h1 className='text-2xl font-bold'>Campaigns</h1><Link href='/campaigns/new' className='underline'>New Campaign</Link></main>}
