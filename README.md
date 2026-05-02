@@ -2,12 +2,30 @@
 
 Production-ready Next.js + Prisma SaaS starter for orchestrating renewal email campaigns with multi-agent workflow (ORC, SENTINEL, SCRIBE, LEXI).
 
+## Prerequisites
+- Node.js 20 LTS (recommended)
+- npm 10+
+- PostgreSQL 15+ (or managed Postgres)
+
+> If `npm` is not installed, install Node.js first (npm ships with Node.js).
+
 ## Setup
-1. `npm install`
-2. Copy `.env.example` to `.env`
-3. `npx prisma db push`
-4. `npx prisma db seed --schema prisma/schema.prisma`
-5. `npm run dev`
+1. Confirm tool versions:
+   - `node -v`
+   - `npm -v`
+2. Install dependencies: `npm install`
+3. Copy `.env.example` to `.env`
+4. Apply schema: `npx prisma db push`
+5. Seed demo data: `npx prisma db seed --schema prisma/schema.prisma`
+6. Run locally: `npm run dev`
+
+## Build & Versioning
+- Build command: `npm run build`
+- App semantic version is stored in `package.json` under `version`.
+- Recommended release flow:
+  1. bump version (`npm version patch|minor|major`)
+  2. build (`npm run build`)
+  3. deploy
 
 ## Architecture
 - Next.js App Router frontend and API routes
