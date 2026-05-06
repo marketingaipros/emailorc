@@ -1,0 +1,5 @@
+First Name,Last Name,Email,Company,DNC
+John,Doe,john.doe@example.com,Acme Corp,No
+Jane,Smith,,Missing Email Inc,No
+Bob,Wilson,bob@dnc.com,Spammy Co,Yes
+Alice,Johnson,alice@valid.com,Valid Enterprise,No

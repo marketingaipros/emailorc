@@ -9,17 +9,15 @@ datasource db {
 
 model Organization {
   id                 String             @id @default(cuid())
-  name               String
+  name               String             // organization_name
   slug               String             @unique
-  subscriptionStatus String             @default("TRIAL") // TRIAL, ACTIVE, PAST_DUE, CANCELED
-  subscriptionPlanId String?
-  subscriptionPlan   SubscriptionPlan?  @relation(fields: [subscriptionPlanId], references: [id])
-  creditBalance      Int                @default(0)
-  billingResetDate   DateTime?
-  apiKey             String?            @unique
-  isActive           Boolean            @default(true)
+  plan               String             @default("TRIAL") // STARTER, GROWTH, PRO, ENTERPRISE
+  subscriptionStatus String             @default("ACTIVE") // ACTIVE, PAST_DUE, CANCELED
+  aiCredits          Int                @default(0) // ai_credits
+  status             String             @default("ACTIVE") // ACTIVE, SUSPENDED, ARCHIVED
   
-  users              User[]
+  users              Membership[]
+  invites            Invite[]
   campaigns          Campaign[]
   usageLogs          UsageLog[]
   modelSettings      ModelSetting[]
@@ -31,20 +29,35 @@ model Organization {
 model User {
   id              String         @id @default(cuid())
   email           String         @unique
-  name            String?
+  firstName       String?
+  lastName        String?
   jobTitle        String?
   passwordHash    String?
-  role            String         @default("CLIENT_ADMIN") // SUPER_ADMIN, CLIENT_ADMIN, EDITOR, REVIEWER, VIEWER
-  status          String         @default("ACTIVE")       // ACTIVE, INACTIVE, PENDING, ARCHIVED
-  lastLoginAt     DateTime?
-  organizationId  String?
-  organization    Organization?  @relation(fields: [organizationId], references: [id])
+  status          String         @default("ACTIVE") // ACTIVE, INVITED, SUSPENDED, ARCHIVED
+  lastLogin       DateTime?
   
+  memberships     Membership[]
+  auditLogs       AuditLog[]
   usageLogs       UsageLog[]
   loginHistory    LoginHistory[]
   
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  role           String       @default("VIEWER") // SUPER_ADMIN, CLIENT_ADMIN, EDITOR, REVIEWER, VIEWER
+  status         String       @default("ACTIVE")
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([userId, organizationId])
 }
 
 model LoginHistory {
@@ -56,14 +69,29 @@ model LoginHistory {
   timestamp DateTime @default(now())
 }
 
-model InviteToken {
-  id             String   @id @default(cuid())
+model Invite {
+  id             String    @id @default(cuid())
   email          String
-  token          String   @unique
-  role           String
   organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  role           String
+  inviteToken    String    @unique
   expiresAt      DateTime
-  createdAt      DateTime @default(now())
+  acceptedAt     DateTime?
+  status         String    @default("PENDING") // PENDING, ACCEPTED, EXPIRED
+
+  createdAt      DateTime  @default(now())
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorUserId  String?
+  actor        User?    @relation(fields: [actorUserId], references: [id])
+  action       String   // e.g., "CREATE_USER", "EDIT_USER"
+  targetType   String   // e.g., "USER", "ORGANIZATION"
+  targetId     String?
+  metadata     String?  // JSON string
+  createdAt    DateTime @default(now())
 }
 
 model Campaign {
@@ -127,7 +155,7 @@ model UsageLog {
 model ModelSetting {
   id              String       @id @default(cuid())
   organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id])
+  organization     Organization @relation(fields: [organizationId], references: [id])
   
   taskName        String       // ORC_INTAKE, SENTINEL_STRATEGY, etc.
   selectedModel   String
@@ -149,8 +177,6 @@ model SubscriptionPlan {
   monthlyCreditLimit Int
   basePrice          Float
   features           String         // JSON string of allowed features
-  
-  organizations      Organization[]
   
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt

@@ -1,86 +1,105 @@
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient } = require("@prisma/client");
+const bcrypt = require("bcryptjs");
+
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('Seeding demo accounts...');
-
-  // 1. Subscription Plans
-  const plans = [
-    { name: 'Trial', monthlyCreditLimit: 100, basePrice: 0, features: '{"core": true}' },
-    { name: 'Starter', monthlyCreditLimit: 500, basePrice: 99, features: '{"core": true, "qa": true}' },
-    { name: 'Growth', monthlyCreditLimit: 2500, basePrice: 299, features: '{"core": true, "qa": true, "reply": true}' },
-    { name: 'Pro', monthlyCreditLimit: 10000, basePrice: 799, features: '{"core": true, "qa": true, "reply": true, "admin": true}' },
-  ];
-
-  for (const plan of plans) {
-    await prisma.subscriptionPlan.upsert({
-      where: { name: plan.name },
-      update: plan,
-      create: plan,
-    });
-  }
-
-  // 2. Organizations
-  const growthPlan = await prisma.subscriptionPlan.findUnique({ where: { name: 'Growth' } });
-  
-  const orgs = [
-    { 
-      id: 'org_super_admin', 
-      name: 'Account Growth Ops', 
-      slug: 'growth-ops', 
-      subscriptionStatus: 'ACTIVE',
-      subscriptionPlanId: growthPlan.id,
-      creditBalance: 50000,
-      isActive: true
+  // Create Demo Organization
+  const demoOrg = await prisma.organization.upsert({
+    where: { slug: "demo-org" },
+    update: {},
+    create: {
+      name: "Demo Organization",
+      slug: "demo-org",
+      plan: "GROWTH",
+      subscriptionStatus: "ACTIVE",
+      aiCredits: 10000,
+      status: "ACTIVE",
     },
-    { 
-      id: 'org_client', 
-      name: 'Acme Revenue', 
-      slug: 'acme-revenue', 
-      subscriptionStatus: 'ACTIVE',
-      subscriptionPlanId: growthPlan.id,
-      creditBalance: 1832,
-      isActive: true
-    }
-  ];
+  });
 
-  for (const org of orgs) {
-    await prisma.organization.upsert({
-      where: { id: org.id },
-      update: org,
-      create: org,
-    });
-  }
-
-  // 3. Users
   const users = [
     {
-      email: 'admin@demo.com',
-      name: 'Super Admin',
-      role: 'SUPER_ADMIN',
-      organizationId: 'org_super_admin',
-      status: 'ACTIVE',
-      jobTitle: 'System Architect'
+      email: "admin@demo.com",
+      firstName: "Super",
+      lastName: "Admin",
+      password: "DemoAdmin123!",
+      role: "SUPER_ADMIN",
+      orgSlug: "demo-org",
     },
     {
-      email: 'client@demo.com',
-      name: 'Client Admin',
-      role: 'CLIENT_ADMIN',
-      organizationId: 'org_client',
-      status: 'ACTIVE',
-      jobTitle: 'RevOps Lead'
-    }
+      email: "client@demo.com",
+      firstName: "Client",
+      lastName: "Admin",
+      password: "DemoClient123!",
+      role: "CLIENT_ADMIN",
+      orgSlug: "demo-org",
+    },
+    {
+      email: "editor@demo.com",
+      firstName: "Demo",
+      lastName: "Editor",
+      password: "DemoEditor123!",
+      role: "EDITOR",
+      orgSlug: "demo-org",
+    },
+    {
+      email: "reviewer@demo.com",
+      firstName: "Demo",
+      lastName: "Reviewer",
+      password: "DemoReviewer123!",
+      role: "REVIEWER",
+      orgSlug: "demo-org",
+    },
+    {
+      email: "viewer@demo.com",
+      firstName: "Demo",
+      lastName: "Viewer",
+      password: "DemoViewer123!",
+      role: "VIEWER",
+      orgSlug: "demo-org",
+    },
   ];
 
-  for (const user of users) {
-    await prisma.user.upsert({
-      where: { email: user.email },
-      update: user,
-      create: user,
+  for (const u of users) {
+    const passwordHash = await bcrypt.hash(u.password, 10);
+    const user = await prisma.user.upsert({
+      where: { email: u.email },
+      update: {
+        firstName: u.firstName,
+        lastName: u.lastName,
+        passwordHash,
+        status: "ACTIVE",
+      },
+      create: {
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        passwordHash,
+        status: "ACTIVE",
+      },
+    });
+
+    // Assign to Org
+    await prisma.membership.upsert({
+      where: {
+        userId_organizationId: {
+          userId: user.id,
+          organizationId: demoOrg.id,
+        },
+      },
+      update: {
+        role: u.role,
+      },
+      create: {
+        userId: user.id,
+        organizationId: demoOrg.id,
+        role: u.role,
+      },
     });
   }
 
-  console.log('Seeding complete.');
+  console.log("Seed data created successfully.");
 }
 
 main()

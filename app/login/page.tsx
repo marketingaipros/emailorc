@@ -12,8 +12,8 @@ export default function LoginPage() {
   const [error, setError] = useState("");
 
   const demoAccounts = {
-    admin: { email: "admin@demo.com", password: "DemoAdmin123!", role: "SUPER_ADMIN", org: "Account Growth Ops" },
-    client: { email: "client@demo.com", password: "DemoClient123!", role: "CLIENT_ADMIN", org: "Acme Revenue" }
+    admin: { email: "admin@demo.com", password: "DemoAdmin123!" },
+    client: { email: "client@demo.com", password: "DemoClient123!" }
   };
 
   const handleLogin = async (e?: React.FormEvent, credentials?: typeof demoAccounts.admin) => {
@@ -24,27 +24,32 @@ export default function LoginPage() {
     const loginEmail = credentials?.email || email;
     const loginPassword = credentials?.password || password;
 
-    // Mock authentication logic for demo
-    setTimeout(() => {
-      if (loginEmail === demoAccounts.admin.email && loginPassword === demoAccounts.admin.password) {
-        localStorage.setItem("userRole", "SUPER_ADMIN");
-        localStorage.setItem("userEmail", loginEmail);
-        localStorage.setItem("userName", "Super Admin");
-        localStorage.setItem("userOrg", "Account Growth Ops");
-        localStorage.setItem("orgId", "org_super_admin");
-        router.push("/mvp/dashboard");
-      } else if (loginEmail === demoAccounts.client.email && loginPassword === demoAccounts.client.password) {
-        localStorage.setItem("userRole", "CLIENT_ADMIN");
-        localStorage.setItem("userEmail", loginEmail);
-        localStorage.setItem("userName", "Client Admin");
-        localStorage.setItem("userOrg", "Acme Revenue");
-        localStorage.setItem("orgId", "org_client");
-        router.push("/mvp/dashboard");
-      } else {
-        setError("Invalid email or password. Use demo buttons for testing.");
-        setIsLoading(false);
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Authentication failed");
       }
-    }, 1200);
+
+      // Store session data
+      localStorage.setItem("userRole", data.role);
+      localStorage.setItem("userEmail", data.email);
+      localStorage.setItem("userName", data.name);
+      localStorage.setItem("userOrg", data.orgName);
+      localStorage.setItem("orgId", data.orgId);
+      localStorage.setItem("userId", data.id);
+
+      router.push("/mvp");
+    } catch (err: any) {
+      setError(err.message);
+      setIsLoading(false);
+    }
   };
 
   return (

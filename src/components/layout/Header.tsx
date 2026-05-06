@@ -46,7 +46,7 @@ export function Header() {
 
   const handleSwitchMode = () => {
     if (role === "SUPER_ADMIN") {
-      router.push("/mvp/dashboard"); // Or wherever the client view starts
+      router.push("/mvp"); // Or wherever the client view starts
     } else {
       router.push("/mvp/admin");
     }
@@ -69,10 +69,43 @@ export function Header() {
         </div>
         
         <div className="flex items-center gap-x-4 lg:gap-x-6">
-          <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-[10px] font-bold uppercase tracking-widest">
-            <Zap className="h-3 w-3 fill-indigo-500" />
-            Demo Mode
-          </div>
+          {(() => {
+            const [env, setEnv] = useState<{ mode: string }>({ mode: 'DEMO' });
+            useEffect(() => {
+              const saved = localStorage.getItem("envConfig");
+              if (saved) setEnv(JSON.parse(saved));
+              
+              const handleStorage = () => {
+                const updated = localStorage.getItem("envConfig");
+                if (updated) setEnv(JSON.parse(updated));
+              };
+              window.addEventListener('storage', handleStorage);
+              const interval = setInterval(handleStorage, 1000); // Polling as fallback for same-window updates
+              return () => {
+                window.removeEventListener('storage', handleStorage);
+                clearInterval(interval);
+              };
+            }, []);
+
+            const badgeStyles: Record<string, string> = {
+              DEMO: "bg-indigo-50 border-indigo-100 text-indigo-700",
+              TEST_LIVE: "bg-amber-50 border-amber-100 text-amber-700",
+              PRODUCTION: "bg-red-50 border-red-100 text-red-700"
+            };
+
+            const labels: Record<string, string> = {
+              DEMO: "Demo Environment",
+              TEST_LIVE: "Test Live Environment",
+              PRODUCTION: "Production Environment"
+            };
+
+            return (
+              <div className={`hidden md:flex items-center gap-2 px-3 py-1 rounded-full border text-[10px] font-bold uppercase tracking-widest ${badgeStyles[env.mode] || badgeStyles.DEMO}`}>
+                <Zap className="h-3 w-3 fill-current" />
+                {labels[env.mode] || labels.DEMO}
+              </div>
+            );
+          })()}
           
           <div className="h-6 w-px bg-slate-200" />
 
