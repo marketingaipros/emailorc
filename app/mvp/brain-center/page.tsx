@@ -98,14 +98,14 @@ export default function BrainCenterPage() {
   // Model Settings Provider State
   const [modelProvider, setModelProvider] = useState("OpenRouter");
 
-  const updateModel = (id: string, field: keyof ModelConfig, value: any) => {
-    setModels(models.map(m => m.id === id ? { ...m, [field]: value } : m));
-  };
+  function updateModel(id: string, field: keyof ModelConfig, value: any) {
+    setModels(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
+  }
 
-  const handleSave = () => {
+  function handleSave() {
     setIsSaving(true);
     setTimeout(() => setIsSaving(false), 800);
-  };
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12">
@@ -180,66 +180,37 @@ export default function BrainCenterPage() {
                     <select 
                       value={modelProvider}
                       onChange={(e) => setModelProvider(e.target.value)}
-                      className="bg-slate-800 border-slate-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 py-1"
+                      className="bg-slate-800 border-slate-700 text-xs rounded-lg px-3 py-1.5 focus:ring-indigo-500 focus:border-indigo-500"
                     >
                       <option value="OpenRouter">OpenRouter</option>
-                      <option value="Anthropic">Anthropic (Direct)</option>
-                      <option value="OpenAI">OpenAI (Direct)</option>
+                      <option value="Anthropic">Anthropic</option>
+                      <option value="OpenAI">OpenAI</option>
                     </select>
-                    <button className="flex items-center gap-2 px-3 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors">
-                      <RefreshCw className="h-3 w-3" /> Sync Models
+                    <button className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors">
+                      <RefreshCw className="h-3.5 w-3.5" /> Sync Models
                     </button>
                   </div>
                 </div>
 
-                {/* Cost Mode Legend */}
-                <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100 text-sm">
-                  <span className="font-semibold text-slate-700">Cost Modes:</span>
-                  <div className="flex items-center gap-1.5 text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
-                    <span className="h-2 w-2 rounded-full bg-indigo-500"></span> Quality (Best for reasoning)
-                  </div>
-                  <div className="flex items-center gap-1.5 text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-100">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500"></span> Balanced (Good for daily use)
-                  </div>
-                  <div className="flex items-center gap-1.5 text-slate-700 bg-white px-2.5 py-1 rounded-md border border-slate-200">
-                    <span className="h-2 w-2 rounded-full bg-slate-400"></span> Economy (Fast, cheaper)
-                  </div>
-                </div>
-
-                <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {models.map((model) => (
-                    <div key={model.id} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                      {/* Top Bar */}
-                      <div className="bg-slate-50 border-b border-slate-200 px-4 py-3 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center gap-2">
-                            <Settings2 className="h-4 w-4 text-slate-400" />
-                            <h3 className="font-medium text-slate-900 text-sm">{model.taskName}</h3>
-                          </div>
-                          <span className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full border ${
-                            model.costMode === "Quality" ? "bg-indigo-50 text-indigo-700 border-indigo-200" :
-                            model.costMode === "Balanced" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                            "bg-white text-slate-600 border-slate-200"
-                          }`}>
-                            {model.costMode}
-                          </span>
-                        </div>
+                    <div key={model.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                      <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/30">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-slate-500">Active</span>
-                          <button 
-                            onClick={() => updateModel(model.id, "active", !model.active)}
-                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${model.active ? 'bg-indigo-600' : 'bg-slate-200'}`}
-                          >
-                            <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${model.active ? 'translate-x-4' : 'translate-x-0'}`} />
-                          </button>
+                          <Settings2 className="h-4 w-4 text-slate-400" />
+                          <h3 className="text-sm font-semibold text-slate-900">{model.taskName}</h3>
                         </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                          model.costMode === "Quality" ? "bg-amber-50 text-amber-700 border border-amber-100" :
+                          model.costMode === "Balanced" ? "bg-indigo-50 text-indigo-700 border border-indigo-100" :
+                          "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                        }`}>
+                          {model.costMode}
+                        </span>
                       </div>
-
-                      {/* Content */}
-                      <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-6">
-                        
-                        {/* Column 1: Model Selection */}
-                        <div className="space-y-4">
+                      
+                      <div className="p-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
                           <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Selected Model</label>
                             <select 
@@ -249,30 +220,30 @@ export default function BrainCenterPage() {
                             >
                               <option value="gpt-4o">GPT-4o</option>
                               <option value="gpt-4o-mini">GPT-4o Mini</option>
-                              <option value="gpt-4-turbo">GPT-4 Turbo</option>
                               <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
-                              <option value="claude-3-opus">Claude 3 Opus</option>
                               <option value="claude-3-haiku">Claude 3 Haiku</option>
-                              <option value="text-embedding-3-small">text-embedding-3-small</option>
+                              <option value="meta-llama/llama-3.1-405b">Llama 3.1 405B</option>
                             </select>
                           </div>
                           <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Fallback Model</label>
-                            <input 
-                              type="text" 
+                            <select 
                               value={model.fallbackModel}
                               onChange={(e) => updateModel(model.id, "fallbackModel", e.target.value)}
-                              placeholder="e.g. claude-3-haiku"
-                              className="w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white placeholder:text-slate-300"
-                            />
+                              className="w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                            >
+                              <option value="">None</option>
+                              <option value="gpt-4o-mini">GPT-4o Mini</option>
+                              <option value="claude-3-haiku">Claude 3 Haiku</option>
+                              <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                            </select>
                           </div>
                         </div>
 
-                        {/* Column 2: Parameters */}
-                        <div className="space-y-4">
-                          <div>
-                            <div className="flex justify-between items-center mb-1">
-                              <label className="block text-xs font-medium text-slate-500">Temperature / Creativity</label>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <div className="flex justify-between">
+                              <label className="block text-xs font-medium text-slate-500">Temperature</label>
                               <span className="text-xs text-slate-900 font-medium">{model.temperature}</span>
                             </div>
                             <input 
@@ -284,7 +255,7 @@ export default function BrainCenterPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-medium text-slate-500 mb-1">Max Output Length (Tokens)</label>
+                            <label className="block text-xs font-medium text-slate-500 mb-1">Max Length</label>
                             <input 
                               type="number" 
                               value={model.maxLength}
@@ -294,7 +265,6 @@ export default function BrainCenterPage() {
                           </div>
                         </div>
 
-                        {/* Column 3: Meta */}
                         <div className="space-y-4">
                           <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Purpose / Instructions</label>
@@ -344,7 +314,6 @@ export default function BrainCenterPage() {
                 {activeUsageSubTab === "Current Plan" && (
                   <div className="space-y-8">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      {/* Current Plan Card */}
                       <div className="col-span-1 md:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
                         <div className="flex items-center justify-between mb-4">
                           <h3 className="text-lg font-semibold text-slate-900">Current Plan: Growth</h3>
@@ -367,7 +336,6 @@ export default function BrainCenterPage() {
                         </div>
                       </div>
 
-                      {/* AI Credits Visual */}
                       <div className="bg-slate-900 rounded-2xl p-6 shadow-sm text-white flex flex-col justify-between">
                         <div>
                           <h3 className="text-sm font-medium text-slate-400">AI Credits Remaining</h3>
@@ -381,15 +349,10 @@ export default function BrainCenterPage() {
                             <span>668 used</span>
                             <span>2,500 total</span>
                           </div>
-                          <div className="pt-4 border-t border-white/10 flex justify-between items-center">
-                            <span className="text-[10px] text-slate-400 uppercase font-bold">Approx. Full Emails</span>
-                            <span className="text-sm font-semibold text-indigo-300">~183 emails</span>
-                          </div>
                         </div>
                       </div>
                     </div>
 
-                    {/* Usage Metrics */}
                     <div>
                       <h3 className="text-md font-semibold text-slate-900 mb-4">Usage This Month</h3>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -444,7 +407,7 @@ export default function BrainCenterPage() {
                             <tr key={i} className="hover:bg-slate-50/50">
                               <td className="px-6 py-4 font-medium text-slate-900">{rule.name}</td>
                               <td className="px-6 py-4">
-                                <input type="number" value={rule.cost} className="w-16 text-sm rounded-md border-slate-200 py-1" />
+                                <input type="number" defaultValue={rule.cost} className="w-16 text-sm rounded-md border-slate-200 py-1" />
                               </td>
                               <td className="px-6 py-4">
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">{rule.status}</span>
@@ -469,28 +432,6 @@ export default function BrainCenterPage() {
                     <h3 className="text-lg font-semibold text-slate-900">Build Your Subscription Tiers</h3>
                     <p className="text-sm text-slate-500 max-w-sm mx-auto">Create Trial, Starter, Growth, and Pro plans with specific credit allowances and feature gating.</p>
                     <button className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-sm transition-all">Create New Plan</button>
-                    
-                    <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6 px-6 text-left">
-                       {["Trial", "Starter", "Growth"].map(p => (
-                         <div key={p} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative group overflow-hidden">
-                            <div className="flex justify-between items-start mb-4">
-                              <h4 className="font-bold text-slate-900">{p} Plan</h4>
-                              <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">Active</span>
-                            </div>
-                            <div className="space-y-2 mb-6">
-                              <div className="flex justify-between text-xs text-slate-500">
-                                <span>Monthly Credits</span>
-                                <span className="font-semibold text-slate-900">{p === "Trial" ? "100" : p === "Starter" ? "500" : "2,500"}</span>
-                              </div>
-                              <div className="flex justify-between text-xs text-slate-500">
-                                <span>Price</span>
-                                <span className="font-semibold text-slate-900">{p === "Trial" ? "$0" : p === "Starter" ? "$99" : "$299"}/mo</span>
-                              </div>
-                            </div>
-                            <button className="w-full py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">Edit Plan</button>
-                         </div>
-                       ))}
-                    </div>
                   </div>
                 )}
 
@@ -511,20 +452,6 @@ export default function BrainCenterPage() {
                           <button className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-indigo-600">
                             <span className="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-4" />
                           </button>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Trial Duration (Days)</label>
-                          <select className="w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white">
-                            <option value="7">7 Days</option>
-                            <option value="14">14 Days</option>
-                            <option value="30">30 Days</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Trial AI Credit Gift</label>
-                          <input type="number" value="100" className="w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white" />
                         </div>
                       </div>
                     </div>
@@ -559,18 +486,9 @@ export default function BrainCenterPage() {
                         <h3 className="text-md font-semibold text-slate-900">Event Audit Log</h3>
                         <div className="flex gap-2">
                            <button className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium hover:bg-slate-50 transition-colors">Export Logs</button>
-                           <button className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium hover:bg-slate-50 transition-colors">Clear Audit</button>
                         </div>
                       </div>
                       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                         <div className="p-4 border-b border-slate-100 flex gap-4">
-                            <input type="text" placeholder="Filter by user or org..." className="text-xs rounded-lg border-slate-200 w-full max-w-xs" />
-                            <select className="text-xs rounded-lg border-slate-200">
-                               <option>All Actions</option>
-                               <option>Deductions</option>
-                               <option>Failures</option>
-                            </select>
-                         </div>
                          <table className="w-full text-left text-xs">
                             <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold">
                               <tr>
@@ -586,8 +504,6 @@ export default function BrainCenterPage() {
                                  { time: "2026-05-06 10:12:04", action: "Full Generation Run", cost: "-10", model: "GPT-4o", status: "Success" },
                                  { time: "2026-05-06 10:10:55", action: "QA Validation", cost: "-2", model: "GPT-4o", status: "Success" },
                                  { time: "2026-05-06 09:45:12", action: "Reply Classification", cost: "-2", model: "GPT-4o-mini", status: "Success" },
-                                 { time: "2026-05-06 09:32:01", action: "Record Validation", cost: "-1", model: "GPT-4o-mini", status: "Success" },
-                                 { time: "2026-05-06 09:15:33", action: "Strategy Generation", cost: "0", model: "Claude 3.5", status: "Failed (Timeout)" },
                                ].map((log, i) => (
                                  <tr key={i} className="hover:bg-slate-50/50">
                                     <td className="px-6 py-3 text-slate-400 font-mono">{log.time}</td>
@@ -603,15 +519,11 @@ export default function BrainCenterPage() {
                                ))}
                             </tbody>
                          </table>
-                         <div className="p-4 border-t border-slate-100 bg-slate-50/30 flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                            <span>Showing last 5 events</span>
-                            <button className="text-indigo-600 hover:text-indigo-800 flex items-center gap-1">View Full Audit <ChevronRight className="h-3 w-3" /></button>
-                         </div>
                       </div>
                    </div>
                 )}
               </div>
-            ) : (
+            ) : activeTab === "API Connection" ? (
               <div className="space-y-8">
                 {/* Status Bar */}
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center justify-between">
@@ -628,18 +540,12 @@ export default function BrainCenterPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {/* Left Col: Auth */}
                   <div className="space-y-6">
                     <div>
                       <h3 className="text-md font-semibold text-slate-900 mb-1">API Authentication</h3>
                       <p className="text-sm text-slate-500 mb-4">Manage your organization's API credentials securely.</p>
                     </div>
                     
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1">Organization ID</label>
-                      <input type="text" disabled value="org_c92jd84kl2" className="w-full text-sm rounded-lg border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed" />
-                    </div>
-
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Brain API Key</label>
                       <div className="relative">
@@ -657,23 +563,15 @@ export default function BrainCenterPage() {
                         </button>
                       </div>
                     </div>
-
-                    <div className="flex gap-3">
-                      <button className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors">Save Key</button>
-                      <button className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-2">
-                        <RefreshCw className="h-4 w-4" /> Test Connection
-                      </button>
-                    </div>
                   </div>
 
-                  {/* Right Col: Demo Controls */}
                   <div className="space-y-6 bg-slate-50 border border-slate-200 rounded-xl p-6">
                     <div>
                       <h3 className="text-md font-semibold text-slate-900 mb-1 flex items-center gap-2">
                         <ShieldAlert className="h-4 w-4 text-amber-500" />
                         Demo & Hybrid Controls
                       </h3>
-                      <p className="text-sm text-slate-500 mb-4">Configure fallback data sets to ensure successful demonstrations even without internet.</p>
+                      <p className="text-sm text-slate-500 mb-4">Configure fallback data sets to ensure successful demonstrations.</p>
                     </div>
 
                     <div className="space-y-4">
@@ -693,27 +591,14 @@ export default function BrainCenterPage() {
                       <div className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg shadow-sm">
                         <div>
                           <p className="text-sm font-medium text-slate-900">Use Sample Leads</p>
-                          <p className="text-xs text-slate-500">Inject sample accountant campaigns.</p>
                         </div>
                         <button onClick={() => setUseSampleData(!useSampleData)} className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${useSampleData ? 'bg-indigo-600' : 'bg-slate-200'}`}>
                           <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${useSampleData ? 'translate-x-4' : 'translate-x-0'}`} />
                         </button>
                       </div>
-
-                      <div className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg shadow-sm">
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">Use Fallback Outputs</p>
-                          <p className="text-xs text-slate-500">If live API fails, load cached demo drafts.</p>
-                        </div>
-                        <button onClick={() => setUseFallbackOutputs(!useFallbackOutputs)} className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${useFallbackOutputs ? 'bg-indigo-600' : 'bg-slate-200'}`}>
-                          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${useFallbackOutputs ? 'translate-x-4' : 'translate-x-0'}`} />
-                        </button>
-                      </div>
-
                     </div>
                   </div>
                 </div>
-
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center h-[400px] text-center space-y-4">
