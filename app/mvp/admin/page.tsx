@@ -27,7 +27,8 @@ import {
   MailPlus,
   Trash2,
   Power,
-  RotateCcw
+  RotateCcw,
+  Save
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
