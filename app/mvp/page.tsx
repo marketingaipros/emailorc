@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Users, TrendingUp, Mail, CheckCircle, XCircle,
@@ -30,20 +30,34 @@ const workflowSteps = [
 ];
 
 export default function DashboardPage() {
+  const [credits, setCredits] = useState(1832);
+  const [role, setRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    setRole(localStorage.getItem("userRole"));
+    // In a real app, we would fetch this from the API
+  }, []);
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
 
       {/* Page Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Account Growth Command Center</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Account Growth Command Center</h1>
           <p className="text-sm text-slate-500 mt-1">
             Turn customer records into approved upsell outreach — without touching a live CRM or inbox yet.
           </p>
         </div>
-        <div className="hidden sm:flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-200 px-4 py-1.5 text-xs font-semibold text-emerald-700">
-          <ShieldAlert className="h-3.5 w-3.5" />
-          Auto-send OFF · Human Approval Required
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col items-end px-4 py-2 bg-slate-950 rounded-xl border border-white/5 shadow-lg">
+             <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">AI Credits Remaining</span>
+             <span className="text-lg font-black text-white">{credits.toLocaleString()}</span>
+          </div>
+          <div className="hidden sm:flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3 text-[10px] font-bold text-emerald-700 uppercase tracking-widest">
+            <ShieldAlert className="h-3.5 w-3.5" />
+            Auto-send OFF
+          </div>
         </div>
       </div>
 

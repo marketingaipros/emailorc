@@ -1,14 +1,249 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
-enum CampaignStatus { DRAFT ACTIVE COMPLETED }
-enum ProcessingStatus { PENDING VALID NEEDS_REVIEW APPROVED FINAL_OUTPUT_READY }
-enum CampaignMode { RENEWAL_UPSELL RENEWAL_PROTECTION RENEWAL_ACCELERATION RENEWAL_REACTIVATION UNKNOWN }
-enum KnowledgeType { FACT PRODUCT OFFER FAQ BANNED_PHRASE TONE_PREFERENCE CTA_PREFERENCE }
-model User { id String @id @default(cuid()) email String @unique name String? role String @default("admin") createdAt DateTime @default(now()) updatedAt DateTime @updatedAt campaigns Campaign[] }
-model Campaign { id String @id @default(cuid()) name String description String? status CampaignStatus @default(DRAFT) createdById String createdBy User @relation(fields: [createdById], references: [id]) rows CampaignRow[] learningLog LearningLogEntry[] createdAt DateTime @default(now()) updatedAt DateTime @updatedAt }
-model CampaignRow { id String @id @default(cuid()) campaignId String campaign Campaign @relation(fields: [campaignId], references: [id]) sourceRowId String businessName String? decisionMaker String? email String? renewalDate DateTime? daysToRenew Int? industry String? offerType String? notes String? normalizedJson Json? validationStatus Json? missingFieldsJson Json? campaignMode CampaignMode @default(UNKNOWN) processingStatus ProcessingStatus @default(PENDING) finalOutputReady Boolean @default(false) strategies StrategyOutput[] drafts EmailDraft[] qaOutputs QAOutput[] createdAt DateTime @default(now()) updatedAt DateTime @updatedAt }
-model StrategyOutput { id String @id @default(cuid()) campaignRowId String campaignRow CampaignRow @relation(fields:[campaignRowId], references:[id]) strategicAngle String coreRisk String upsellBridge String valueOutcome String ctaDirection String toneGuidance String redFlags String version Int @default(1) createdAt DateTime @default(now()) }
-model EmailDraft { id String @id @default(cuid()) campaignRowId String campaignRow CampaignRow @relation(fields:[campaignRowId], references:[id]) subjectLine1 String subjectLine2 String previewText String emailBody String cta String personalizationUsed String writerNotes String version Int @default(1) createdAt DateTime @default(now()) }
-model QAOutput { id String @id @default(cuid()) campaignRowId String campaignRow CampaignRow @relation(fields:[campaignRowId], references:[id]) qaStatus String spamRiskLevel String issuesFound String revisionsMade String finalSubjectLine1 String finalSubjectLine2 String finalPreviewText String finalEmailBody String finalCta String humanizationNotes String overallQualityScore Int approvalStatus String revisionCount Int topIssuesLoweringScore String requiredFixes String version Int @default(1) createdAt DateTime @default(now()) }
-model KnowledgeBaseEntry { id String @id @default(cuid()) title String type KnowledgeType content String active Boolean @default(true) createdAt DateTime @default(now()) updatedAt DateTime @updatedAt }
-model LearningLogEntry { id String @id @default(cuid()) campaignId String campaign Campaign @relation(fields:[campaignId], references:[id]) rowId String category String note String createdAt DateTime @default(now()) }
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// SQLite doesn't support enums, using Strings instead
+
+model Organization {
+  id                 String             @id @default(cuid())
+  name               String
+  slug               String             @unique
+  subscriptionPlanId String?
+  subscriptionStatus String             @default("TRIAL") // TRIAL, ACTIVE, PAST_DUE, CANCELED, EXPIRED
+  creditBalance      Int                @default(100)
+  billingResetDate   DateTime?
+  apiKey             String?            @unique
+  isActive           Boolean            @default(true)
+  
+  users              User[]
+  campaigns          Campaign[]
+  usageLogs          UsageLog[]
+  modelSettings      ModelSetting[]
+  
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  passwordHash   String?
+  name           String?
+  role           String       @default("VIEWER") // SUPER_ADMIN, CLIENT_ADMIN, EDITOR, REVIEWER, VIEWER
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  campaigns      Campaign[]
+  usageLogs      UsageLog[]
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model Campaign {
+  id             String             @id @default(cuid())
+  name           String
+  description    String?
+  status         String             @default("DRAFT") // DRAFT, ACTIVE, COMPLETED
+  
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  
+  createdById    String
+  createdBy      User               @relation(fields: [createdById], references: [id])
+  
+  rows           CampaignRow[]
+  learningLog    LearningLogEntry[]
+  usageLogs      UsageLog[]
+  
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+}
+
+model CampaignRow {
+  id                 String           @id @default(cuid())
+  campaignId         String
+  campaign           Campaign         @relation(fields: [campaignId], references: [id])
+  
+  sourceRowId        String
+  businessName       String?
+  decisionMaker      String?
+  email              String?
+  renewalDate        DateTime?
+  daysToRenew        Int?
+  industry           String?
+  offerType          String?
+  notes              String?
+  
+  normalizedJson     String? 
+  validationStatus   String?
+  missingFieldsJson  String?
+  
+  campaignMode       String           @default("UNKNOWN") // RENEWAL_UPSELL, RENEWAL_PROTECTION, etc.
+  processingStatus   String           @default("PENDING") // PENDING, VALID, NEEDS_REVIEW, APPROVED, FINAL_OUTPUT_READY
+  finalOutputReady   Boolean          @default(false)
+  
+  strategies         StrategyOutput[]
+  drafts             EmailDraft[]
+  qaOutputs          QAOutput[]
+  usageLogs          UsageLog[]
+  
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+}
+
+model StrategyOutput {
+  id             String      @id @default(cuid())
+  campaignRowId  String
+  campaignRow    CampaignRow @relation(fields: [campaignRowId], references: [id])
+  
+  strategicAngle String
+  coreRisk       String
+  upsellBridge   String
+  valueOutcome   String
+  ctaDirection   String
+  toneGuidance   String
+  redFlags       String
+  
+  version        Int         @default(1)
+  createdAt      DateTime    @default(now())
+}
+
+model EmailDraft {
+  id                 String      @id @default(cuid())
+  campaignRowId      String
+  campaignRow        CampaignRow @relation(fields: [campaignRowId], references: [id])
+  
+  subjectLine1       String
+  subjectLine2       String
+  previewText        String
+  emailBody          String
+  cta                String
+  personalizationUsed String
+  writerNotes        String
+  
+  version            Int         @default(1)
+  createdAt      DateTime    @default(now())
+}
+
+model QAOutput {
+  id                      String      @id @default(cuid())
+  campaignRowId           String
+  campaignRow             CampaignRow @relation(fields: [campaignRowId], references: [id])
+  
+  qaStatus                String
+  spamRiskLevel           String
+  issuesFound             String
+  revisionsMade           String
+  finalSubjectLine1       String
+  finalSubjectLine2       String
+  finalPreviewText        String
+  finalEmailBody          String
+  finalCta                String
+  humanizationNotes       String
+  overallQualityScore     Int
+  approvalStatus          String
+  revisionCount           Int
+  topIssuesLoweringScore  String
+  requiredFixes           String
+  
+  version                 Int         @default(1)
+  createdAt               DateTime    @default(now())
+}
+
+model SubscriptionPlan {
+  id                 String   @id @default(cuid())
+  name               String
+  monthlyCredits     Int
+  priceMonthly       Float
+  featuresJson       String?  // Gating info
+  isTrial            Boolean  @default(false)
+  trialDurationDays  Int      @default(14)
+  
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model CreditRule {
+  id          String   @id @default(cuid())
+  actionName  String   @unique
+  creditCost  Int
+  isActive    Boolean  @default(true)
+  notes       String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ModelSetting {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  taskName       String
+  provider       String       @default("OpenRouter")
+  selectedModel  String
+  fallbackModel  String?
+  temperature    Float        @default(0.7)
+  maxLength      Int          @default(1000)
+  costMode       String       @default("Balanced")
+  active         Boolean      @default(true)
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  
+  @@unique([organizationId, taskName])
+}
+
+model UsageLog {
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  
+  userId          String
+  user            User         @relation(fields: [userId], references: [id])
+  
+  campaignId      String?
+  campaign        Campaign?    @relation(fields: [campaignId], references: [id])
+  
+  campaignRowId   String?
+  campaignRow     CampaignRow? @relation(fields: [campaignRowId], references: [id])
+  
+  action          String
+  modelUsed       String?
+  promptTokens    Int?
+  completionTokens Int?
+  totalTokens     Int?
+  estimatedApiCost Float?
+  creditsCharged  Int
+  
+  success         Boolean      @default(true)
+  errorMessage    String?
+  
+  timestamp       DateTime     @default(now())
+}
+
+model KnowledgeBaseEntry {
+  id        String        @id @default(cuid())
+  title     String
+  type      String        // FACT, PRODUCT, OFFER, etc.
+  content   String
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model LearningLogEntry {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  rowId      String
+  category   String
+  note       String
+  createdAt  DateTime @default(now())
+}

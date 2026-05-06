@@ -67,15 +67,15 @@ interface ModelConfig {
 }
 
 const DEFAULT_MODELS: ModelConfig[] = [
-  { id: "orc", taskName: "ORC Intake and Validation Model", selectedModel: "gpt-4o-mini", purpose: "Parses uploaded records, determines campaign mode, checks DNC status.", temperature: 0.1, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "claude-3-haiku", notes: "Requires strict JSON formatting. Fast model preferred." },
-  { id: "sentinel", taskName: "SENTINEL Strategy Model", selectedModel: "gpt-4o", purpose: "Creates the strategic angle, upsell bridge, risk framing, and value outcome.", temperature: 0.7, maxLength: 800, costMode: "Quality", active: true, fallbackModel: "claude-3-5-sonnet", notes: "Needs high reasoning capability to avoid generic sales pitches." },
-  { id: "scribe", taskName: "SCRIBE Writing Model", selectedModel: "gpt-4o", purpose: "Writes the actual email copy following PAS frameworks and rules.", temperature: 0.6, maxLength: 400, costMode: "Quality", active: true, fallbackModel: "claude-3-5-sonnet", notes: "Must strictly adhere to word counts and banned phrase lists." },
-  { id: "lexi", taskName: "LEXI QA Model", selectedModel: "gpt-4o", purpose: "Scores the draft, checks spam risk, and forces revisions if score < 90.", temperature: 0.2, maxLength: 1000, costMode: "Quality", active: true, fallbackModel: "gpt-4-turbo", notes: "Needs high instruction-following to enforce the 90/100 threshold." },
-  { id: "reply_class", taskName: "Reply Classification Model", selectedModel: "gpt-4o-mini", purpose: "Detects intent and sentiment from inbound customer replies.", temperature: 0.1, maxLength: 200, costMode: "Economy", active: true, fallbackModel: "claude-3-haiku", notes: "" },
-  { id: "reply_draft", taskName: "Reply Drafting Model", selectedModel: "claude-3-5-sonnet", purpose: "Drafts the recommended response for the Reply Assistant.", temperature: 0.5, maxLength: 400, costMode: "Balanced", active: true, fallbackModel: "gpt-4o", notes: "" },
+  { id: "orc", taskName: "ORC Intake and Validation Model", selectedModel: "gpt-5-nano", purpose: "Parses uploaded records, determines campaign mode, checks DNC status.", temperature: 0.1, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "gpt-5-mini", notes: "Requires strict JSON formatting. Fast model preferred." },
+  { id: "sentinel", taskName: "SENTINEL Strategy Model", selectedModel: "gpt-5-mini", purpose: "Creates the strategic angle, upsell bridge, risk framing, and value outcome.", temperature: 0.7, maxLength: 800, costMode: "Quality", active: true, fallbackModel: "gpt-5.1", notes: "Needs high reasoning capability to avoid generic sales pitches." },
+  { id: "scribe", taskName: "SCRIBE Writing Model", selectedModel: "gpt-5-mini", purpose: "Writes the actual email copy following PAS frameworks and rules.", temperature: 0.6, maxLength: 400, costMode: "Quality", active: true, fallbackModel: "gpt-5.1", notes: "Must strictly adhere to word counts and banned phrase lists." },
+  { id: "lexi", taskName: "LEXI QA Model", selectedModel: "gpt-5.1", purpose: "Scores the draft, checks spam risk, and forces revisions if score < 90.", temperature: 0.2, maxLength: 1000, costMode: "Quality", active: true, fallbackModel: "gpt-5.4-mini", notes: "Needs high instruction-following to enforce the 90/100 threshold." },
+  { id: "reply_class", taskName: "Reply Classification Model", selectedModel: "gpt-5-nano", purpose: "Detects intent and sentiment from inbound customer replies.", temperature: 0.1, maxLength: 200, costMode: "Economy", active: true, fallbackModel: "gpt-5-mini", notes: "" },
+  { id: "reply_draft", taskName: "Reply Drafting Model", selectedModel: "gpt-5-mini", purpose: "Drafts the recommended response for the Reply Assistant.", temperature: 0.5, maxLength: 400, costMode: "Balanced", active: true, fallbackModel: "gpt-5.1", notes: "" },
   { id: "knowledge", taskName: "Knowledge Search / Embedding Model", selectedModel: "text-embedding-3-small", purpose: "Retrieves relevant business knowledge for the strategy context.", temperature: 0, maxLength: 0, costMode: "Economy", active: true, fallbackModel: "", notes: "" },
-  { id: "cleanup", taskName: "Data Cleanup Model", selectedModel: "gpt-4o-mini", purpose: "Standardizes messy input data before ORC validation.", temperature: 0.1, maxLength: 2000, costMode: "Economy", active: true, fallbackModel: "claude-3-haiku", notes: "" },
-  { id: "summarization", taskName: "Summarization Model", selectedModel: "gpt-4o-mini", purpose: "Summarizes account notes and previous interactions for context.", temperature: 0.3, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "claude-3-haiku", notes: "" },
+  { id: "cleanup", taskName: "Data Cleanup Model", selectedModel: "gpt-5-nano", purpose: "Standardizes messy input data before ORC validation.", temperature: 0.1, maxLength: 2000, costMode: "Economy", active: true, fallbackModel: "gpt-5-mini", notes: "" },
+  { id: "summarization", taskName: "Summarization Model", selectedModel: "gpt-5-mini", purpose: "Summarizes account notes and previous interactions for context.", temperature: 0.3, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "gpt-5-nano", notes: "" },
 ];
 
 type UsageSubTab = "Current Plan" | "Credit Rules" | "Plan Builder" | "Trial Settings" | "Usage Logs";
@@ -97,6 +97,7 @@ export default function BrainCenterPage() {
 
   // Model Settings Provider State
   const [modelProvider, setModelProvider] = useState("OpenRouter");
+  const [costTrackingMode, setCostTrackingMode] = useState(true);
 
   function updateModel(id: string, field: keyof ModelConfig, value: any) {
     setModels(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
@@ -149,7 +150,7 @@ export default function BrainCenterPage() {
             <div>
               <h2 className="text-lg font-semibold text-slate-900">{activeTab}</h2>
               <p className="text-sm text-slate-500">
-                {activeTab === "Model Settings" && "Map specific LLMs to discrete tasks to balance quality and economy."}
+                {activeTab === "Model Settings" && "Map specific GPT-5 series LLMs to discrete tasks to balance quality and economy."}
                 {activeTab === "Usage & Billing" && "Manage your AI Credits, subscription tier, and usage metrics."}
                 {activeTab === "API Connection" && "Configure your Brain API environment, keys, and hybrid demo fallback settings."}
                 {!["Model Settings", "Usage & Billing", "API Connection"].includes(activeTab) && "Configure intelligence parameters for the AI generation workflow."}
@@ -167,6 +168,17 @@ export default function BrainCenterPage() {
           <div className="p-6">
             {activeTab === "Model Settings" ? (
               <div className="space-y-8">
+                {/* Admin Note for GPT-5 */}
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                  <ShieldAlert className="h-5 w-5 text-amber-500 mt-0.5" />
+                  <div>
+                    <h3 className="text-sm font-semibold text-amber-800">Admin Routing Note</h3>
+                    <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                      Use **GPT-5 nano** for low-cost utility tasks, **GPT-5 mini** for most production email work, and **GPT-5.1** or **GPT-5.4 mini** for premium QA and final drafts.
+                    </p>
+                  </div>
+                </div>
+
                 {/* Provider Selection */}
                 <div className="flex items-center justify-between p-4 bg-slate-900 rounded-xl shadow-sm text-white">
                   <div className="flex items-center gap-3">
@@ -218,11 +230,11 @@ export default function BrainCenterPage() {
                               onChange={(e) => updateModel(model.id, "selectedModel", e.target.value)}
                               className="w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
                             >
-                              <option value="gpt-4o">GPT-4o</option>
-                              <option value="gpt-4o-mini">GPT-4o Mini</option>
-                              <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
-                              <option value="claude-3-haiku">Claude 3 Haiku</option>
-                              <option value="meta-llama/llama-3.1-405b">Llama 3.1 405B</option>
+                              <option value="gpt-5-nano">GPT-5 Nano</option>
+                              <option value="gpt-5-mini">GPT-5 Mini</option>
+                              <option value="gpt-5.1">GPT-5.1</option>
+                              <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                              <option value="text-embedding-3-small">Embeddings 3 Small</option>
                             </select>
                           </div>
                           <div>
@@ -233,9 +245,10 @@ export default function BrainCenterPage() {
                               className="w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
                             >
                               <option value="">None</option>
-                              <option value="gpt-4o-mini">GPT-4o Mini</option>
-                              <option value="claude-3-haiku">Claude 3 Haiku</option>
-                              <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                              <option value="gpt-5-nano">GPT-5 Nano</option>
+                              <option value="gpt-5-mini">GPT-5 Mini</option>
+                              <option value="gpt-5.1">GPT-5.1</option>
+                              <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
                             </select>
                           </div>
                         </div>
@@ -483,35 +496,46 @@ export default function BrainCenterPage() {
                 {activeUsageSubTab === "Usage Logs" && (
                    <div className="space-y-4">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-md font-semibold text-slate-900">Event Audit Log</h3>
+                        <h3 className="text-md font-bold text-slate-900">Brain API Audit Log</h3>
                         <div className="flex gap-2">
-                           <button className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium hover:bg-slate-50 transition-colors">Export Logs</button>
+                           <button className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold hover:bg-slate-50 transition-all flex items-center gap-2">
+                             <Download className="h-3.5 w-3.5" /> Export CSV
+                           </button>
                         </div>
                       </div>
                       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                         <table className="w-full text-left text-xs">
-                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold">
+                         <table className="w-full text-left text-[11px]">
+                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[9px] font-black tracking-widest">
                               <tr>
-                                <th className="px-6 py-3">Timestamp</th>
-                                <th className="px-6 py-3">Action</th>
-                                <th className="px-6 py-3">Credits</th>
-                                <th className="px-6 py-3">Model</th>
-                                <th className="px-6 py-3">Status</th>
+                                <th className="px-4 py-3">Timestamp</th>
+                                <th className="px-4 py-3">Organization</th>
+                                <th className="px-4 py-3">User</th>
+                                <th className="px-4 py-3">Action / Task</th>
+                                <th className="px-4 py-3">Model</th>
+                                <th className="px-4 py-3">Tokens (P/O)</th>
+                                <th className="px-4 py-3">API Cost</th>
+                                <th className="px-4 py-3">Credits</th>
+                                <th className="px-4 py-3">Status</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100">
+                            <tbody className="divide-y divide-slate-100 font-medium">
                                {[
-                                 { time: "2026-05-06 10:12:04", action: "Full Generation Run", cost: "-10", model: "GPT-4o", status: "Success" },
-                                 { time: "2026-05-06 10:10:55", action: "QA Validation", cost: "-2", model: "GPT-4o", status: "Success" },
-                                 { time: "2026-05-06 09:45:12", action: "Reply Classification", cost: "-2", model: "GPT-4o-mini", status: "Success" },
+                                 { time: "2026-05-06 10:12:04", org: "Acme", user: "j.smith", action: "SENTINEL Strategy", cost: "-2", model: "GPT-5.1", tokens: "1,240 / 480", api: "$0.014", status: "Success" },
+                                 { time: "2026-05-06 10:10:55", org: "Acme", user: "j.smith", action: "SCRIBE Writing", cost: "-5", model: "GPT-5-mini", tokens: "850 / 620", api: "$0.006", status: "Success" },
+                                 { time: "2026-05-06 09:45:12", org: "Globex", user: "h.simpson", action: "LEXI QA", cost: "-2", model: "GPT-5.1", tokens: "2,100 / 150", api: "$0.021", status: "Success" },
+                                 { time: "2026-05-06 09:30:01", org: "Acme", user: "j.smith", action: "ORC Validation", cost: "-1", model: "GPT-5-nano", tokens: "4,200 / 200", api: "$0.001", status: "Success" },
                                ].map((log, i) => (
-                                 <tr key={i} className="hover:bg-slate-50/50">
-                                    <td className="px-6 py-3 text-slate-400 font-mono">{log.time}</td>
-                                    <td className="px-6 py-3 font-medium text-slate-900">{log.action}</td>
-                                    <td className={`px-6 py-3 font-bold ${log.cost === "0" ? "text-slate-400" : "text-amber-600"}`}>{log.cost}</td>
-                                    <td className="px-6 py-3 text-slate-500">{log.model}</td>
-                                    <td className="px-6 py-3">
-                                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${log.status.includes("Failed") ? "bg-red-50 text-red-600 border border-red-100" : "bg-emerald-50 text-emerald-600 border border-emerald-100"}`}>
+                                 <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                                    <td className="px-4 py-3 text-slate-400 font-mono">{log.time.split(' ')[1]}</td>
+                                    <td className="px-4 py-3 text-slate-600 font-bold">{log.org}</td>
+                                    <td className="px-4 py-3 text-slate-500">{log.user}</td>
+                                    <td className="px-4 py-3 text-slate-900 font-bold">{log.action}</td>
+                                    <td className="px-4 py-3 text-indigo-600">{log.model}</td>
+                                    <td className="px-4 py-3 text-slate-500 font-mono">{log.tokens}</td>
+                                    <td className="px-4 py-3 text-emerald-600 font-bold">{log.api}</td>
+                                    <td className="px-4 py-3 font-black text-amber-600">{log.cost}</td>
+                                    <td className="px-4 py-3">
+                                       <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${log.status.includes("Failed") ? "bg-red-50 text-red-600 border border-red-100" : "bg-emerald-50 text-emerald-600 border border-emerald-100"}`}>
                                           {log.status}
                                        </span>
                                     </td>
@@ -519,6 +543,10 @@ export default function BrainCenterPage() {
                                ))}
                             </tbody>
                          </table>
+                      </div>
+                      <div className="flex items-center justify-between px-2">
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Showing last 50 events</p>
+                        <button className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-colors">View All Audit Logs →</button>
                       </div>
                    </div>
                 )}
@@ -594,6 +622,16 @@ export default function BrainCenterPage() {
                         </div>
                         <button onClick={() => setUseSampleData(!useSampleData)} className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${useSampleData ? 'bg-indigo-600' : 'bg-slate-200'}`}>
                           <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${useSampleData ? 'translate-x-4' : 'translate-x-0'}`} />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg shadow-sm">
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">Track OpenRouter Costs</p>
+                          <p className="text-[10px] text-slate-500">Log token usage and estimated API cost per request.</p>
+                        </div>
+                        <button onClick={() => setCostTrackingMode(!costTrackingMode)} className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${costTrackingMode ? 'bg-indigo-600' : 'bg-slate-200'}`}>
+                          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${costTrackingMode ? 'translate-x-4' : 'translate-x-0'}`} />
                         </button>
                       </div>
                     </div>
