@@ -13,7 +13,13 @@ import {
   History, 
   GraduationCap,
   Save,
-  CheckCircle2
+  CheckCircle2,
+  CreditCard,
+  Link2,
+  Zap,
+  RefreshCw,
+  Eye,
+  EyeOff
 } from "lucide-react";
 
 type Tab = 
@@ -24,7 +30,9 @@ type Tab =
   | "Decision Rules" 
   | "Model Settings" 
   | "Learning Log" 
-  | "Learn Mode";
+  | "Learn Mode"
+  | "API Connection"
+  | "Usage & Billing";
 
 const TABS: { name: Tab; icon: React.ReactNode }[] = [
   { name: "Business Knowledge", icon: <Briefcase className="h-4 w-4" /> },
@@ -35,6 +43,8 @@ const TABS: { name: Tab; icon: React.ReactNode }[] = [
   { name: "Model Settings", icon: <Cpu className="h-4 w-4" /> },
   { name: "Learning Log", icon: <History className="h-4 w-4" /> },
   { name: "Learn Mode", icon: <GraduationCap className="h-4 w-4" /> },
+  { name: "API Connection", icon: <Link2 className="h-4 w-4" /> },
+  { name: "Usage & Billing", icon: <CreditCard className="h-4 w-4" /> },
 ];
 
 interface ModelConfig {
@@ -63,9 +73,16 @@ const DEFAULT_MODELS: ModelConfig[] = [
 ];
 
 export default function BrainCenterPage() {
-  const [activeTab, setActiveTab] = useState<Tab>("Model Settings");
+  const [activeTab, setActiveTab] = useState<Tab>("Usage & Billing");
   const [models, setModels] = useState<ModelConfig[]>(DEFAULT_MODELS);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // API Connection State
+  const [apiKey, setApiKey] = useState("sk_demo_9a8b7c6d5e4f3g2h1i0j");
+  const [showKey, setShowKey] = useState(false);
+  const [envMode, setEnvMode] = useState<"Demo" | "Test" | "Production">("Demo");
+  const [useSampleData, setUseSampleData] = useState(true);
+  const [useFallbackOutputs, setUseFallbackOutputs] = useState(true);
 
   const updateModel = (id: string, field: keyof ModelConfig, value: any) => {
     setModels(models.map(m => m.id === id ? { ...m, [field]: value } : m));
@@ -119,7 +136,9 @@ export default function BrainCenterPage() {
               <h2 className="text-lg font-semibold text-slate-900">{activeTab}</h2>
               <p className="text-sm text-slate-500">
                 {activeTab === "Model Settings" && "Map specific LLMs to discrete tasks to balance quality and economy."}
-                {activeTab !== "Model Settings" && "Configure intelligence parameters for the AI generation workflow."}
+                {activeTab === "Usage & Billing" && "Manage your AI Credits, subscription tier, and usage metrics."}
+                {activeTab === "API Connection" && "Configure your Brain API environment, keys, and hybrid demo fallback settings."}
+                {!["Model Settings", "Usage & Billing", "API Connection"].includes(activeTab) && "Configure intelligence parameters for the AI generation workflow."}
               </p>
             </div>
             <button
@@ -260,6 +279,172 @@ export default function BrainCenterPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            ) : activeTab === "Usage & Billing" ? (
+              <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Current Plan */}
+                  <div className="col-span-1 md:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-slate-900">Current Plan: Growth</h3>
+                      <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-medium">Active Subscription</span>
+                    </div>
+                    <p className="text-sm text-slate-500 mb-6 max-w-md">You are currently on the Growth tier, giving your organization access to the full 4-role Brain and 2,500 AI credits per month.</p>
+                    <div className="flex gap-4">
+                      <button className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">Upgrade to Pro</button>
+                      <button className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">Buy Extra Credits</button>
+                    </div>
+                  </div>
+
+                  {/* AI Credits */}
+                  <div className="bg-slate-900 rounded-2xl p-6 shadow-sm text-white flex flex-col justify-between">
+                    <div>
+                      <h3 className="text-sm font-medium text-slate-400">AI Credits Remaining</h3>
+                      <p className="text-4xl font-bold mt-2">1,832</p>
+                    </div>
+                    <div className="space-y-2 mt-6">
+                      <div className="w-full bg-slate-800 rounded-full h-2">
+                        <div className="bg-emerald-400 h-2 rounded-full" style={{ width: '26%' }}></div>
+                      </div>
+                      <div className="flex justify-between text-xs text-slate-400">
+                        <span>668 used</span>
+                        <span>2,500 total</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2">Resets on June 1st</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Usage Metrics */}
+                <div>
+                  <h3 className="text-md font-semibold text-slate-900 mb-4">Usage This Month</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[
+                      { label: "Drafts Generated", value: "324", cost: "5 credits ea." },
+                      { label: "QA Reviews", value: "348", cost: "2 credits ea." },
+                      { label: "Replies Classified", value: "91", cost: "2 credits ea." },
+                      { label: "Knowledge Searches", value: "112", cost: "1 credit ea." },
+                    ].map((stat, i) => (
+                      <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl p-4">
+                        <p className="text-xs font-medium text-slate-500">{stat.label}</p>
+                        <p className="text-2xl font-bold text-slate-900 mt-1">{stat.value}</p>
+                        <p className="text-[10px] text-slate-400 mt-1">{stat.cost}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex gap-3">
+                  <Zap className="h-5 w-5 text-blue-600 shrink-0" />
+                  <div className="text-sm text-blue-800">
+                    <p className="font-semibold mb-1">How Credits Work</p>
+                    <p className="text-blue-700/80">Credits are deducted only after a successful generation. A full ORC → SENTINEL → SCRIBE → LEXI generation costs 10 AI Credits. Failed calls do not deduct credits.</p>
+                  </div>
+                </div>
+              </div>
+            ) : activeTab === "API Connection" ? (
+              <div className="space-y-8">
+                {/* Status Bar */}
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-emerald-800">Brain API Connected</h3>
+                      <p className="text-xs text-emerald-600">All systems operational. Latency: 124ms</p>
+                    </div>
+                  </div>
+                  <span className="bg-white border border-emerald-200 text-emerald-700 text-xs font-medium px-2.5 py-1 rounded-md shadow-sm">
+                    {envMode} Environment
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {/* Left Col: Auth */}
+                  <div className="space-y-6">
+                    <div>
+                      <h3 className="text-md font-semibold text-slate-900 mb-1">API Authentication</h3>
+                      <p className="text-sm text-slate-500 mb-4">Manage your organization's API credentials securely.</p>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Organization ID</label>
+                      <input type="text" disabled value="org_c92jd84kl2" className="w-full text-sm rounded-lg border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed" />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Brain API Key</label>
+                      <div className="relative">
+                        <input 
+                          type={showKey ? "text" : "password"} 
+                          value={apiKey} 
+                          onChange={(e) => setApiKey(e.target.value)}
+                          className="w-full text-sm rounded-lg border-slate-200 pr-10 focus:ring-indigo-500 focus:border-indigo-500" 
+                        />
+                        <button 
+                          onClick={() => setShowKey(!showKey)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <button className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors">Save Key</button>
+                      <button className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-2">
+                        <RefreshCw className="h-4 w-4" /> Test Connection
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right Col: Demo Controls */}
+                  <div className="space-y-6 bg-slate-50 border border-slate-200 rounded-xl p-6">
+                    <div>
+                      <h3 className="text-md font-semibold text-slate-900 mb-1 flex items-center gap-2">
+                        <ShieldAlert className="h-4 w-4 text-amber-500" />
+                        Demo & Hybrid Controls
+                      </h3>
+                      <p className="text-sm text-slate-500 mb-4">Configure fallback data sets to ensure successful demonstrations even without internet.</p>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Environment Mode</label>
+                        <select 
+                          value={envMode} 
+                          onChange={(e) => setEnvMode(e.target.value as any)}
+                          className="w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                        >
+                          <option value="Demo">Demo (Hybrid Fallbacks)</option>
+                          <option value="Test">Test (Sandbox API)</option>
+                          <option value="Production">Production (Live CRM & API)</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg shadow-sm">
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">Use Sample Leads</p>
+                          <p className="text-xs text-slate-500">Inject sample accountant campaigns.</p>
+                        </div>
+                        <button onClick={() => setUseSampleData(!useSampleData)} className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${useSampleData ? 'bg-indigo-600' : 'bg-slate-200'}`}>
+                          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${useSampleData ? 'translate-x-4' : 'translate-x-0'}`} />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg shadow-sm">
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">Use Fallback Outputs</p>
+                          <p className="text-xs text-slate-500">If live API fails, load cached demo drafts.</p>
+                        </div>
+                        <button onClick={() => setUseFallbackOutputs(!useFallbackOutputs)} className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${useFallbackOutputs ? 'bg-indigo-600' : 'bg-slate-200'}`}>
+                          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${useFallbackOutputs ? 'translate-x-4' : 'translate-x-0'}`} />
+                        </button>
+                      </div>
+
+                    </div>
+                  </div>
+                </div>
+
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center h-[400px] text-center space-y-4">
