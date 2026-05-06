@@ -41,12 +41,20 @@ export default function AdminConsole() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
   
+  const [searchQuery, setSearchQuery] = useState("");
+  
   const [userList, setUserList] = useState([
     { id: "u1", name: "Jane Smith", email: "jane.smith@acme.com", org: "Acme Revenue", role: "CLIENT_ADMIN", status: "ACTIVE", lastLogin: "2 min ago", created: "2026-04-12" },
     { id: "u2", name: "Bob Johnson", email: "bob@globex.com", org: "Globex Corp", role: "EDITOR", status: "ACTIVE", lastLogin: "1 day ago", created: "2026-04-15" },
     { id: "u3", name: "Alice Stark", email: "alice@stark.com", org: "Stark Industries", role: "REVIEWER", status: "PENDING", lastLogin: "Never", created: "2026-05-01" },
     { id: "u4", name: "Charlie Brown", email: "charlie@acme.com", org: "Acme Revenue", role: "VIEWER", status: "INACTIVE", lastLogin: "12 days ago", created: "2026-03-20" },
   ]);
+
+  const filteredUsers = userList.filter(user => 
+    user.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    user.org.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const [newUser, setNewUser] = useState({ firstName: "", lastName: "", email: "", org: "Acme Revenue", role: "EDITOR" });
 
@@ -84,6 +92,12 @@ export default function AdminConsole() {
     e.preventDefault();
     setUserList(userList.map(u => u.id === selectedUser.id ? selectedUser : u));
     setIsEditModalOpen(false);
+  };
+
+  const handleDeleteUser = (id: string) => {
+    if (confirm("Are you sure you want to delete this user?")) {
+      setUserList(userList.filter(u => u.id !== id));
+    }
   };
 
   const orgs = [
@@ -162,6 +176,8 @@ export default function AdminConsole() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input 
                 type="text" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={`Search ${activeTab.toLowerCase()}...`} 
                 className="pl-9 pr-4 py-2 text-sm rounded-xl border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-full md:w-72 bg-white shadow-sm"
               />
@@ -184,7 +200,7 @@ export default function AdminConsole() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {userList.map((user) => (
+                      {filteredUsers.map((user) => (
                         <tr key={user.id} className="hover:bg-slate-50/30 transition-colors group">
                           <td className="px-6 py-4">
                             <div className="font-bold text-slate-900">{user.name}</div>
@@ -225,7 +241,13 @@ export default function AdminConsole() {
                                   <Settings2 className="h-4 w-4" />
                                 </button>
                                 <button title="Send Invite" className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"><MailPlus className="h-4 w-4" /></button>
-                                <button title="Delete" className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 transition-colors"><Trash2 className="h-4 w-4" /></button>
+                                <button 
+                                  onClick={() => handleDeleteUser(user.id)}
+                                  title="Delete" 
+                                  className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 transition-colors"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
                              </div>
                           </td>
                         </tr>
