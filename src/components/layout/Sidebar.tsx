@@ -13,7 +13,8 @@ import {
   Download, 
   Settings,
   Plug,
-  BookOpen
+  BookOpen,
+  Brain
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -32,6 +33,7 @@ const navigation = [
   { name: "Export Center",   href: "/mvp/export",       icon: Download },
   { name: "Integrations",    href: "/mvp/integrations", icon: Plug },
   { name: "How-To",          href: "/mvp/howto",        icon: BookOpen },
+  { name: "Brain Center",    href: "/mvp/brain-center", icon: Brain },
   { name: "Settings",        href: "/mvp/settings",     icon: Settings },
 ];
 
