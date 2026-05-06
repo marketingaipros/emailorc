@@ -37,6 +37,17 @@ export default function AdminConsole() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<AdminTab>("Users");
   const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+  
+  const [userList, setUserList] = useState([
+    { id: "u1", name: "Jane Smith", email: "jane.smith@acme.com", org: "Acme Revenue", role: "CLIENT_ADMIN", status: "ACTIVE", lastLogin: "2 min ago", created: "2026-04-12" },
+    { id: "u2", name: "Bob Johnson", email: "bob@globex.com", org: "Globex Corp", role: "EDITOR", status: "ACTIVE", lastLogin: "1 day ago", created: "2026-04-15" },
+    { id: "u3", name: "Alice Stark", email: "alice@stark.com", org: "Stark Industries", role: "REVIEWER", status: "PENDING", lastLogin: "Never", created: "2026-05-01" },
+    { id: "u4", name: "Charlie Brown", email: "charlie@acme.com", org: "Acme Revenue", role: "VIEWER", status: "INACTIVE", lastLogin: "12 days ago", created: "2026-03-20" },
+  ]);
+
+  const [newUser, setNewUser] = useState({ firstName: "", lastName: "", email: "", org: "Acme Revenue", role: "EDITOR" });
 
   useEffect(() => {
     const role = localStorage.getItem("userRole");
@@ -45,12 +56,34 @@ export default function AdminConsole() {
     }
   }, [router]);
 
-  const userList = [
-    { id: "u1", name: "Jane Smith", email: "jane.smith@acme.com", org: "Acme Revenue", role: "CLIENT_ADMIN", status: "ACTIVE", lastLogin: "2 min ago", created: "2026-04-12" },
-    { id: "u2", name: "Bob Johnson", email: "bob@globex.com", org: "Globex Corp", role: "EDITOR", status: "ACTIVE", lastLogin: "1 day ago", created: "2026-04-15" },
-    { id: "u3", name: "Alice Stark", email: "alice@stark.com", org: "Stark Industries", role: "REVIEWER", status: "PENDING", lastLogin: "Never", created: "2026-05-01" },
-    { id: "u4", name: "Charlie Brown", email: "charlie@acme.com", org: "Acme Revenue", role: "VIEWER", status: "INACTIVE", lastLogin: "12 days ago", created: "2026-03-20" },
-  ];
+  const handleCreateUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    const id = `u${userList.length + 1}`;
+    const entry = {
+      id,
+      name: `${newUser.firstName} ${newUser.lastName}`,
+      email: newUser.email,
+      org: newUser.org,
+      role: newUser.role,
+      status: "ACTIVE",
+      lastLogin: "Never",
+      created: new Date().toISOString().split('T')[0]
+    };
+    setUserList([entry, ...userList]);
+    setIsCreateUserModalOpen(false);
+    setNewUser({ firstName: "", lastName: "", email: "", org: "Acme Revenue", role: "EDITOR" });
+  };
+
+  const handleEditUser = (user: any) => {
+    setSelectedUser(user);
+    setIsEditModalOpen(true);
+  };
+
+  const handleUpdateUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    setUserList(userList.map(u => u.id === selectedUser.id ? selectedUser : u));
+    setIsEditModalOpen(false);
+  };
 
   const orgs = [
     { id: "org_acme", name: "Acme Revenue Ops", plan: "Growth", status: "Active", users: 12, credits: 1832, used: 668, apiKey: "Connected" },
@@ -183,7 +216,13 @@ export default function AdminConsole() {
                           </td>
                           <td className="px-6 py-4 text-right">
                              <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button title="Edit" className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"><Settings2 className="h-4 w-4" /></button>
+                                <button 
+                                  onClick={() => handleEditUser(user)}
+                                  title="Edit" 
+                                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"
+                                >
+                                  <Settings2 className="h-4 w-4" />
+                                </button>
                                 <button title="Send Invite" className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"><MailPlus className="h-4 w-4" /></button>
                                 <button title="Delete" className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 transition-colors"><Trash2 className="h-4 w-4" /></button>
                              </div>
@@ -305,7 +344,7 @@ export default function AdminConsole() {
         </div>
       </div>
 
-      {/* Create User Modal (Simple Mock) */}
+      {/* Provision New User Modal */}
       {isCreateUserModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-in fade-in duration-200">
            <div className="bg-white rounded-[40px] w-full max-w-2xl shadow-2xl border border-slate-100 overflow-hidden animate-in zoom-in-95 duration-200">
@@ -319,36 +358,60 @@ export default function AdminConsole() {
                     <XCircle className="h-6 w-6" />
                  </button>
               </div>
-              <div className="p-10 space-y-6">
+              <form onSubmit={handleCreateUser} className="p-10 space-y-6">
                  <div className="grid grid-cols-2 gap-6">
                     <div className="space-y-1.5">
                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">First Name</label>
-                       <input type="text" className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500" placeholder="John" />
+                       <input 
+                         required
+                         value={newUser.firstName}
+                         onChange={(e) => setNewUser({...newUser, firstName: e.target.value})}
+                         type="text" className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500" placeholder="John" 
+                       />
                     </div>
                     <div className="space-y-1.5">
                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Last Name</label>
-                       <input type="text" className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500" placeholder="Doe" />
+                       <input 
+                         required
+                         value={newUser.lastName}
+                         onChange={(e) => setNewUser({...newUser, lastName: e.target.value})}
+                         type="text" className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500" placeholder="Doe" 
+                       />
                     </div>
                  </div>
                  <div className="space-y-1.5">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Email Address</label>
-                    <input type="email" className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500" placeholder="john.doe@company.com" />
+                    <input 
+                      required
+                      value={newUser.email}
+                      onChange={(e) => setNewUser({...newUser, email: e.target.value})}
+                      type="email" className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500" placeholder="john.doe@company.com" 
+                    />
                  </div>
                  <div className="grid grid-cols-2 gap-6">
                     <div className="space-y-1.5">
                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Organization</label>
-                       <select className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500">
+                       <select 
+                         value={newUser.org}
+                         onChange={(e) => setNewUser({...newUser, org: e.target.value})}
+                         className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                       >
                           <option>Acme Revenue</option>
                           <option>Globex Corp</option>
+                          <option>Stark Industries</option>
                        </select>
                     </div>
                     <div className="space-y-1.5">
                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">System Role</label>
-                       <select className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500">
-                          <option>Editor</option>
-                          <option>Reviewer</option>
-                          <option>Client Admin</option>
-                          <option>Viewer</option>
+                       <select 
+                         value={newUser.role}
+                         onChange={(e) => setNewUser({...newUser, role: e.target.value})}
+                         className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                       >
+                          <option value="EDITOR">Editor</option>
+                          <option value="REVIEWER">Reviewer</option>
+                          <option value="CLIENT_ADMIN">Client Admin</option>
+                          <option value="VIEWER">Viewer</option>
                        </select>
                     </div>
                  </div>
@@ -359,11 +422,99 @@ export default function AdminConsole() {
                        </div>
                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Send email invite immediately</span>
                     </div>
-                    <button className="bg-slate-950 text-white px-8 py-3.5 rounded-2xl font-black text-sm hover:bg-slate-800 transition-all shadow-xl flex items-center gap-2">
+                    <button type="submit" className="bg-slate-950 text-white px-8 py-3.5 rounded-2xl font-black text-sm hover:bg-slate-800 transition-all shadow-xl flex items-center gap-2">
                        <UserCheck className="h-4 w-4" /> Provision User Account
                     </button>
                  </div>
+              </form>
+           </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {isEditModalOpen && selectedUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-in fade-in duration-200">
+           <div className="bg-white rounded-[40px] w-full max-w-2xl shadow-2xl border border-slate-100 overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="px-10 py-8 bg-indigo-600 text-white flex justify-between items-center relative overflow-hidden">
+                 <div className="relative z-10">
+                    <h2 className="text-2xl font-black tracking-tight">Edit User Account</h2>
+                    <p className="text-white/70 text-xs font-bold uppercase tracking-widest mt-1">Manage credentials & access</p>
+                 </div>
+                 <button onClick={() => setIsEditModalOpen(false)} className="h-10 w-10 bg-white/10 hover:bg-white/20 rounded-2xl flex items-center justify-center transition-all relative z-10">
+                    <XCircle className="h-6 w-6" />
+                 </button>
               </div>
+              <form onSubmit={handleUpdateUser} className="p-10 space-y-6">
+                 <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Full Name</label>
+                    <input 
+                      required
+                      value={selectedUser.name}
+                      onChange={(e) => setSelectedUser({...selectedUser, name: e.target.value})}
+                      type="text" className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500" 
+                    />
+                 </div>
+                 <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Email Address</label>
+                    <input 
+                      required
+                      value={selectedUser.email}
+                      onChange={(e) => setSelectedUser({...selectedUser, email: e.target.value})}
+                      type="email" className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500" 
+                    />
+                 </div>
+                 <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-1.5">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Organization</label>
+                       <select 
+                         value={selectedUser.org}
+                         onChange={(e) => setSelectedUser({...selectedUser, org: e.target.value})}
+                         className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                       >
+                          <option>Acme Revenue</option>
+                          <option>Globex Corp</option>
+                          <option>Stark Industries</option>
+                       </select>
+                    </div>
+                    <div className="space-y-1.5">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">System Role</label>
+                       <select 
+                         value={selectedUser.role}
+                         onChange={(e) => setSelectedUser({...selectedUser, role: e.target.value})}
+                         className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                       >
+                          <option value="EDITOR">Editor</option>
+                          <option value="REVIEWER">Reviewer</option>
+                          <option value="CLIENT_ADMIN">Client Admin</option>
+                          <option value="VIEWER">Viewer</option>
+                       </select>
+                    </div>
+                 </div>
+                 <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-1.5">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</label>
+                       <select 
+                         value={selectedUser.status}
+                         onChange={(e) => setSelectedUser({...selectedUser, status: e.target.value})}
+                         className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                       >
+                          <option value="ACTIVE">Operational</option>
+                          <option value="PENDING">Pending Approval</option>
+                          <option value="INACTIVE">Deactivated</option>
+                       </select>
+                    </div>
+                    <div className="flex flex-col justify-end">
+                       <button type="button" className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:text-indigo-700 transition-colors">
+                          <RotateCcw className="h-3.5 w-3.5" /> Force Password Reset
+                       </button>
+                    </div>
+                 </div>
+                 <div className="pt-6 flex justify-end">
+                    <button type="submit" className="bg-slate-950 text-white px-10 py-4 rounded-2xl font-black text-sm hover:bg-slate-800 transition-all shadow-xl flex items-center gap-2">
+                       <Save className="h-4 w-4" /> Save User Changes
+                    </button>
+                 </div>
+              </form>
            </div>
         </div>
       )}
