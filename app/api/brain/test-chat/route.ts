@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   TEST_CHAT_TASKS,
+  assertModelAllowed,
   getOpenRouterKey,
   logBrainUsage,
   normalizeMode,
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    assertModelAllowed(model);
     const { key } = await getOpenRouterKey(orgId);
     if (!key) {
       throw new Error("OpenRouter API key is not configured. Save a key or set the OPENROUTER_API_KEY Cloudflare secret.");

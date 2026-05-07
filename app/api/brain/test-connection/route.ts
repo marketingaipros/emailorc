@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   fetchOpenRouterModels,
+  assertModelAllowed,
   getOpenRouterKey,
   logBrainUsage,
   normalizeMode,
@@ -35,19 +36,16 @@ export async function POST(request: Request) {
     if (!key) {
       throw new Error("OpenRouter API key is not configured. Save a key or set the OPENROUTER_API_KEY Cloudflare secret.");
     }
+    assertModelAllowed(selectedModel);
 
     const availableModels = await fetchOpenRouterModels(key);
-    let modelTested = selectedModel;
-    if (!availableModels.includes(modelTested)) {
-      modelTested = availableModels.find((model) => model.includes("gpt-4o-mini")) || availableModels[0] || selectedModel;
-    }
-    if (!modelTested) {
-      throw new Error("OpenRouter authenticated, but no models were returned for this account.");
+    if (!availableModels.includes(selectedModel)) {
+      throw new Error("Selected model unavailable. Choose another model or fallback.");
     }
 
     const chatResult = await sendOpenRouterChat({
       apiKey: key,
-      model: modelTested,
+      model: selectedModel,
       prompt: "Reply with exactly: EmailORC connection ok",
       systemPrompt: "You are validating an API connection. Keep the response short.",
       maxTokens: 24,
@@ -58,7 +56,7 @@ export async function POST(request: Request) {
       userId,
       action: "OPENROUTER_TEST_CONNECTION",
       provider,
-      model: modelTested,
+      model: selectedModel,
       modelMode,
       promptTokens: chatResult.usage?.prompt_tokens,
       completionTokens: chatResult.usage?.completion_tokens,
@@ -73,7 +71,7 @@ export async function POST(request: Request) {
       provider: "OpenRouter",
       environment,
       model_mode: modelMode,
-      model_tested: modelTested,
+      model_tested: selectedModel,
       model_key_source: source,
       available_models_loaded: availableModels.length > 0,
       message: "OpenRouter connection successful.",

@@ -4,11 +4,13 @@ import { createId, getD1Database } from "@/lib/cloudflare-db";
 export type ModelMode = "Economy" | "Balanced" | "Quality" | "Enterprise";
 
 export const MODELS_BY_MODE: Record<ModelMode, string[]> = {
-  Economy: ["openai/gpt-4o-mini", "google/gemini-flash-1.5"],
-  Balanced: ["openai/gpt-4o-mini", "anthropic/claude-3.5-haiku"],
-  Quality: ["openai/gpt-4o", "anthropic/claude-3.5-sonnet"],
-  Enterprise: ["anthropic/claude-3.5-sonnet", "openai/gpt-4o"],
+  Economy: ["openai/gpt-5-nano", "openai/gpt-5-mini"],
+  Balanced: ["openai/gpt-5-mini", "openai/gpt-5-nano"],
+  Quality: ["openai/gpt-5.1", "openai/gpt-5-mini"],
+  Enterprise: ["openai/gpt-5.1", "openai/gpt-5-mini"],
 };
+
+const ALLOWED_MODELS = new Set(Object.values(MODELS_BY_MODE).flat());
 
 export const TEST_CHAT_TASKS: Record<string, string> = {
   "General Test": "Answer clearly and briefly as a helpful business assistant.",
@@ -36,6 +38,12 @@ export function normalizeMode(mode: unknown): ModelMode {
 export function pickModel(mode: ModelMode, selectedModel?: string) {
   const cleaned = String(selectedModel || "").trim();
   return cleaned || MODELS_BY_MODE[mode][0];
+}
+
+export function assertModelAllowed(model: string) {
+  if (!ALLOWED_MODELS.has(model)) {
+    throw new Error("Selected model unavailable. Choose another model or fallback.");
+  }
 }
 
 async function deriveCryptoKey(secret: string) {

@@ -78,21 +78,80 @@ interface ModelConfig {
   notes: string;
 }
 
-const DEFAULT_MODELS: ModelConfig[] = [
-  { id: "orc", taskName: "ORC Intake and Validation Model", selectedModel: "openai/gpt-4o-mini", purpose: "Parses uploaded records, determines campaign mode, checks DNC status.", temperature: 0.1, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "google/gemini-flash-1.5", notes: "Requires strict JSON formatting. Fast model preferred." },
-  { id: "sentinel", taskName: "SENTINEL Strategy Model", selectedModel: "openai/gpt-4o-mini", purpose: "Creates the strategic angle, upsell bridge, risk framing, and value outcome.", temperature: 0.7, maxLength: 800, costMode: "Quality", active: true, fallbackModel: "anthropic/claude-3.5-haiku", notes: "Needs high reasoning capability to avoid generic sales pitches." },
-  { id: "scribe", taskName: "SCRIBE Writing Model", selectedModel: "openai/gpt-4o-mini", purpose: "Writes the actual email copy following PAS frameworks and rules.", temperature: 0.6, maxLength: 400, costMode: "Quality", active: true, fallbackModel: "openai/gpt-4o", notes: "Must strictly adhere to word counts and banned phrase lists." },
-  { id: "lexi", taskName: "LEXI QA Model", selectedModel: "openai/gpt-4o", purpose: "Scores the draft, checks spam risk, and forces revisions if score < 90.", temperature: 0.2, maxLength: 1000, costMode: "Quality", active: true, fallbackModel: "anthropic/claude-3.5-sonnet", notes: "Needs high instruction-following to enforce the 90/100 threshold." },
-  { id: "reply_class", taskName: "Reply Classification Model", selectedModel: "openai/gpt-4o-mini", purpose: "Detects intent and sentiment from inbound customer replies.", temperature: 0.1, maxLength: 200, costMode: "Economy", active: true, fallbackModel: "google/gemini-flash-1.5", notes: "" },
-  { id: "reply_draft", taskName: "Reply Drafting Model", selectedModel: "openai/gpt-4o-mini", purpose: "Drafts the recommended response for the Reply Assistant.", temperature: 0.5, maxLength: 400, costMode: "Balanced", active: true, fallbackModel: "openai/gpt-4o", notes: "" },
-  { id: "knowledge", taskName: "Knowledge Search / Embedding Model", selectedModel: "text-embedding-3-small", purpose: "Retrieves relevant business knowledge for the strategy context.", temperature: 0, maxLength: 0, costMode: "Economy", active: true, fallbackModel: "", notes: "" },
-  { id: "cleanup", taskName: "Data Cleanup Model", selectedModel: "openai/gpt-4o-mini", purpose: "Standardizes messy input data before ORC validation.", temperature: 0.1, maxLength: 2000, costMode: "Economy", active: true, fallbackModel: "google/gemini-flash-1.5", notes: "" },
-  { id: "summarization", taskName: "Summarization Model", selectedModel: "openai/gpt-4o-mini", purpose: "Summarizes account notes and previous interactions for context.", temperature: 0.3, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "google/gemini-flash-1.5", notes: "" },
-];
-
 type ModelMode = "Economy" | "Balanced" | "Quality" | "Enterprise";
 
 type UsageSubTab = "Current Plan" | "Credit Rules" | "Plan Builder" | "Trial Settings" | "Usage Logs";
+
+const GPT5_OPTIONS = [
+  { value: "openai/gpt-5-nano", label: "GPT-5 Nano" },
+  { value: "openai/gpt-5-mini", label: "GPT-5 Mini" },
+  { value: "openai/gpt-5.1", label: "GPT-5.1" },
+];
+
+const MODEL_MODE_ROUTING: Record<ModelMode, Record<string, string>> = {
+  Economy: {
+    orc: "openai/gpt-5-nano",
+    sentinel: "openai/gpt-5-mini",
+    scribe: "openai/gpt-5-mini",
+    lexi: "openai/gpt-5-mini",
+    reply_class: "openai/gpt-5-nano",
+    reply_draft: "openai/gpt-5-mini",
+    cleanup: "openai/gpt-5-nano",
+    summarization: "openai/gpt-5-nano",
+  },
+  Balanced: {
+    orc: "openai/gpt-5-nano",
+    sentinel: "openai/gpt-5-mini",
+    scribe: "openai/gpt-5-mini",
+    lexi: "openai/gpt-5.1",
+    reply_class: "openai/gpt-5-nano",
+    reply_draft: "openai/gpt-5-mini",
+    cleanup: "openai/gpt-5-nano",
+    summarization: "openai/gpt-5-mini",
+  },
+  Quality: {
+    orc: "openai/gpt-5-mini",
+    sentinel: "openai/gpt-5.1",
+    scribe: "openai/gpt-5.1",
+    lexi: "openai/gpt-5.1",
+    reply_class: "openai/gpt-5-nano",
+    reply_draft: "openai/gpt-5.1",
+    cleanup: "openai/gpt-5-nano",
+    summarization: "openai/gpt-5-mini",
+  },
+  Enterprise: {
+    orc: "openai/gpt-5-mini",
+    sentinel: "openai/gpt-5.1",
+    scribe: "openai/gpt-5.1",
+    lexi: "openai/gpt-5.1",
+    reply_class: "openai/gpt-5-nano",
+    reply_draft: "openai/gpt-5.1",
+    cleanup: "openai/gpt-5-nano",
+    summarization: "openai/gpt-5-mini",
+  },
+};
+
+const MODEL_FALLBACKS: Record<string, string> = {
+  "openai/gpt-5.1": "openai/gpt-5-mini",
+  "openai/gpt-5-mini": "openai/gpt-5-nano",
+  "openai/gpt-5-nano": "",
+};
+
+function fallbackFor(model: string) {
+  return MODEL_FALLBACKS[model] ?? "";
+}
+
+const DEFAULT_MODELS: ModelConfig[] = [
+  { id: "orc", taskName: "ORC Intake and Validation Model", selectedModel: "openai/gpt-5-nano", purpose: "Parses uploaded records, determines campaign mode, checks DNC status.", temperature: 0.1, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "openai/gpt-5-mini", notes: "Requires strict JSON formatting. Fast model preferred." },
+  { id: "sentinel", taskName: "SENTINEL Strategy Model", selectedModel: "openai/gpt-5-mini", purpose: "Creates the strategic angle, upsell bridge, risk framing, and value outcome.", temperature: 0.7, maxLength: 800, costMode: "Quality", active: true, fallbackModel: "openai/gpt-5-nano", notes: "Needs high reasoning capability to avoid generic sales pitches." },
+  { id: "scribe", taskName: "SCRIBE Writing Model", selectedModel: "openai/gpt-5-mini", purpose: "Writes the actual email copy following PAS frameworks and rules.", temperature: 0.6, maxLength: 400, costMode: "Quality", active: true, fallbackModel: "openai/gpt-5-nano", notes: "Must strictly adhere to word counts and banned phrase lists." },
+  { id: "lexi", taskName: "LEXI QA Model", selectedModel: "openai/gpt-5.1", purpose: "Scores the draft, checks spam risk, and forces revisions if score < 90.", temperature: 0.2, maxLength: 1000, costMode: "Quality", active: true, fallbackModel: "openai/gpt-5-mini", notes: "Needs high instruction-following to enforce the 90/100 threshold." },
+  { id: "reply_class", taskName: "Reply Classification Model", selectedModel: "openai/gpt-5-nano", purpose: "Detects intent and sentiment from inbound customer replies.", temperature: 0.1, maxLength: 200, costMode: "Economy", active: true, fallbackModel: "", notes: "" },
+  { id: "reply_draft", taskName: "Reply Drafting Model", selectedModel: "openai/gpt-5-mini", purpose: "Drafts the recommended response for the Reply Assistant.", temperature: 0.5, maxLength: 400, costMode: "Balanced", active: true, fallbackModel: "openai/gpt-5-nano", notes: "" },
+  { id: "knowledge", taskName: "Knowledge Search / Embedding Model", selectedModel: "text-embedding-3-small", purpose: "Retrieves relevant business knowledge for the strategy context.", temperature: 0, maxLength: 0, costMode: "Economy", active: true, fallbackModel: "", notes: "" },
+  { id: "cleanup", taskName: "Data Cleanup Model", selectedModel: "openai/gpt-5-nano", purpose: "Standardizes messy input data before ORC validation.", temperature: 0.1, maxLength: 2000, costMode: "Economy", active: true, fallbackModel: "", notes: "" },
+  { id: "summarization", taskName: "Summarization Model", selectedModel: "openai/gpt-5-mini", purpose: "Summarizes account notes and previous interactions for context.", temperature: 0.3, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "openai/gpt-5-nano", notes: "" },
+];
 
 export default function BrainCenterPage() {
   const notice = useNotice();
@@ -132,7 +191,7 @@ export default function BrainCenterPage() {
   const [modelTested, setModelTested] = useState<string | null>(null);
   const [connectionMessage, setConnectionMessage] = useState("No live test has been run in this session.");
 
-  const [chatModel, setChatModel] = useState("openai/gpt-4o-mini");
+  const [chatModel, setChatModel] = useState(MODEL_MODE_ROUTING.Balanced.scribe);
   const [chatTask, setChatTask] = useState("General Test");
   const [chatPrompt, setChatPrompt] = useState("Write a short professional email opening for an accountant who misses calls during tax season.");
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "assistant"; content: string; meta?: string }>>([]);
@@ -237,19 +296,13 @@ export default function BrainCenterPage() {
 
   function applyModelMode(mode: ModelMode) {
     setModelMode(mode);
-    if (mode === "Balanced") {
-      setModels(prev => prev.map(m => {
-        let selectedModel = m.selectedModel;
-        if (m.id === "lexi") selectedModel = "openai/gpt-4o";
-        else selectedModel = "openai/gpt-4o-mini";
-        return { ...m, selectedModel };
-      }));
-    }
-    if (mode === "Economy") setChatModel("openai/gpt-4o-mini");
-    if (mode === "Quality") setChatModel("openai/gpt-4o");
-    if (mode === "Enterprise") setChatModel("anthropic/claude-3.5-sonnet");
+    const routing = MODEL_MODE_ROUTING[mode];
+    setModels(prev => prev.map(m => {
+      const selectedModel = routing[m.id] || m.selectedModel;
+      return { ...m, selectedModel, fallbackModel: fallbackFor(selectedModel) };
+    }));
+    setChatModel(routing.scribe || "openai/gpt-5-mini");
     notice.info(`Model mode set to ${mode}.`, "Model mode updated");
-    // Logic for other modes would go here
   }
 
   function handleSyncModels() {
@@ -468,23 +521,21 @@ export default function BrainCenterPage() {
                               value={model.selectedModel}
                               onChange={(e) => updateModel(model.id, "selectedModel", e.target.value)}
                               className={`w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white ${
-                                (model.selectedModel === "gpt-5.1" && connectionStatus === "Connected") ? "border-amber-300 text-amber-700" : 
-                                (model.selectedModel === "gpt-5-mini" && connectionStatus === "Error") ? "border-red-300 text-red-700" : ""
+                                (model.selectedModel === "openai/gpt-5.1" && connectionStatus === "Connected") ? "border-amber-300 text-amber-700" : 
+                                (model.selectedModel === "openai/gpt-5-mini" && connectionStatus === "Error") ? "border-red-300 text-red-700" : ""
                               }`}
                             >
-                              <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
-                              <option value="openai/gpt-4o">OpenAI GPT-4o</option>
-                              <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
-                              <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-                              <option value="google/gemini-flash-1.5">Gemini Flash 1.5</option>
+                              {GPT5_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
                               <option value="text-embedding-3-small">Embeddings 3 Small</option>
                             </select>
-                            {model.selectedModel === "gpt-5.1" && connectionStatus === "Connected" && (
+                            {model.selectedModel === "openai/gpt-5.1" && connectionStatus === "Connected" && (
                               <p className="text-[10px] text-amber-600 mt-1 font-medium flex items-center gap-1">
                                 <Info className="h-3 w-3" /> Fallback to GPT-5 Mini active
                               </p>
                             )}
-                            {model.selectedModel === "gpt-5-mini" && connectionStatus === "Error" && (
+                            {model.selectedModel === "openai/gpt-5-mini" && connectionStatus === "Error" && (
                               <p className="text-[10px] text-red-600 mt-1 font-bold">
                                 Selected model unavailable. Please choose another model.
                               </p>
@@ -498,11 +549,9 @@ export default function BrainCenterPage() {
                               className="w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
                             >
                               <option value="">None</option>
-                              <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
-                              <option value="openai/gpt-4o">OpenAI GPT-4o</option>
-                              <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
-                              <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-                              <option value="google/gemini-flash-1.5">Gemini Flash 1.5</option>
+                              {GPT5_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
                             </select>
                           </div>
                         </div>
@@ -780,7 +829,7 @@ export default function BrainCenterPage() {
                                    org_name: "Acme",
                                    user_email: "j.smith",
                                    action: "ORC Validation",
-                                   model_used: "openai/gpt-4o-mini",
+                                   model_used: "openai/gpt-5-nano",
                                    credits_charged: 1,
                                    prompt_tokens: 4200,
                                    completion_tokens: 200,
@@ -835,11 +884,9 @@ export default function BrainCenterPage() {
                         onChange={(e) => setChatModel(e.target.value)}
                         className="w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700"
                       >
-                        <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
-                        <option value="openai/gpt-4o">OpenAI GPT-4o</option>
-                        <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
-                        <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-                        <option value="google/gemini-flash-1.5">Gemini Flash 1.5</option>
+                        {GPT5_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
                       </select>
                     </div>
 
@@ -921,15 +968,20 @@ export default function BrainCenterPage() {
 
                     <div className="border-t border-slate-100 p-4 space-y-3">
                       <textarea
+                        id="admin-model-test-prompt"
+                        name="admin-model-test-prompt"
                         value={chatPrompt}
                         onChange={(e) => setChatPrompt(e.target.value)}
+                        placeholder="Ask a question to test the selected model..."
                         rows={3}
-                        className="w-full resize-none rounded-xl border-slate-200 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                        disabled={false}
+                        readOnly={false}
+                        className="relative z-10 w-full resize-none rounded-xl border-slate-200 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-100"
                       />
                       <button
                         type="button"
                         onClick={handleSendTestChat}
-                        disabled={isChatTesting}
+                        disabled={isChatTesting || !chatPrompt.trim()}
                         className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-slate-800 disabled:opacity-50"
                       >
                         {isChatTesting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
