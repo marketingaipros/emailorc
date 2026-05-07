@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Papa from "papaparse";
 import { 
   Brain, 
   Settings2, 
@@ -166,6 +167,54 @@ const DEFAULT_MODELS: ModelConfig[] = [
   { id: "cleanup", taskName: "Data Cleanup Model", selectedModel: "openai/gpt-5-nano", purpose: "Standardizes messy input data before ORC validation.", temperature: 0.1, maxLength: 2000, costMode: "Economy", active: true, fallbackModel: "", notes: "" },
   { id: "summarization", taskName: "Summarization Model", selectedModel: "openai/gpt-5-mini", purpose: "Summarizes account notes and previous interactions for context.", temperature: 0.3, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "openai/gpt-5-nano", notes: "" },
 ];
+
+const BUSINESS_KNOWLEDGE_FIELDS = [
+  ["companyName", "Company Name"], ["website", "Website"], ["industry", "Industry"], ["businessDescription", "Business Description"],
+  ["productsServices", "Products / Services"], ["targetCustomers", "Target Customers"], ["idealCustomerProfile", "Ideal Customer Profile"], ["customerPainPoints", "Customer Pain Points"],
+  ["mainValueProposition", "Main Value Proposition"], ["competitiveAdvantages", "Competitive Advantages"], ["approvedPositioningStatement", "Approved Positioning Statement"], ["approvedClaims", "Approved Claims"],
+  ["bannedClaims", "Banned Claims"], ["faqs", "FAQs"], ["caseStudies", "Case Studies / Proof Points"], ["complianceNotes", "Compliance Notes"],
+  ["internalTerminology", "Internal Terminology"], ["wordsToAvoid", "Words to Avoid"], ["customerObjections", "Customer Objections"], ["preferredCtaLanguage", "Preferred CTA Language"],
+] as const;
+
+const APP_MINDSET_FIELDS = [
+  ["primaryGoal", "Primary Goal of the App"], ["emailPhilosophy", "Email Philosophy"], ["salesPhilosophy", "Sales Philosophy"], ["tonePrinciples", "Tone Principles"],
+  ["structureRules", "Structure Rules"], ["ctaPhilosophy", "CTA Philosophy"], ["personalizationRules", "Personalization Rules"], ["deliverabilityRules", "Deliverability Rules"],
+  ["qualityThreshold", "Quality Threshold"], ["humanApprovalRules", "Human Approval Rules"], ["noInventedFactsRule", "No Invented Facts Rule"], ["riskFramingRules", "Risk Framing Rules"],
+  ["bannedPhrases", "Banned Phrases"], ["preferredEmailFramework", "Preferred Email Framework"], ["outputFormatRules", "Output Format Rules"],
+] as const;
+
+const OFFER_FIELDS = [
+  ["offerName", "Offer Name"], ["offerType", "Offer Type"], ["description", "Description"], ["targetSegment", "Target Segment"],
+  ["bestFitCustomerType", "Best-Fit Customer Type"], ["bestFitIndustries", "Best-Fit Industries"], ["painPointsSolved", "Pain Points Solved"], ["upsellTriggers", "Upsell Triggers"],
+  ["valueOutcomes", "Value Outcomes"], ["approvedClaims", "Approved Claims"], ["bannedClaims", "Banned Claims"], ["ctaOptions", "CTA Options"],
+  ["discoveryCallLink", "Discovery Call Link"], ["leadMagnetLink", "Lead Magnet Link"], ["pricingNotes", "Pricing Notes"], ["qualificationRules", "Qualification Rules"],
+  ["redFlags", "Red Flags"], ["relatedCampaignPlaybooks", "Related Campaign Playbooks"],
+] as const;
+
+function normalizeImportKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function findImportValue(row: Record<string, any>, label: string, key: string) {
+  const direct = row[label] ?? row[key];
+  if (direct !== undefined && direct !== null) return String(direct).trim();
+  const targetKeys = [label, key].map(normalizeImportKey);
+  const match = Object.keys(row).find((header) => targetKeys.includes(normalizeImportKey(header)));
+  return match ? String(row[match] ?? "").trim() : "";
+}
+
+function parseKeyValueText(text: string, fields: readonly (readonly [string, string])[]) {
+  const next: Record<string, string> = {};
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const match = line.match(/^([^:=-]+)[:=-]\s*(.+)$/);
+    if (!match) continue;
+    const [, rawLabel, rawValue] = match;
+    const field = fields.find(([key, label]) => [key, label].map(normalizeImportKey).includes(normalizeImportKey(rawLabel)));
+    if (field) next[field[0]] = rawValue.trim();
+  }
+  return next;
+}
 
 export default function BrainCenterPage() {
   const notice = useNotice();
@@ -391,6 +440,90 @@ export default function BrainCenterPage() {
 
   const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) || offers[0];
 
+  function importBusinessKnowledgeFile(file: File) {
+    const finish = (next: Partial<BusinessKnowledge>) => {
+      const stamped = { ...businessKnowledge, ...next, lastUpdated: new Date().toISOString() };
+      setBusinessKnowledge(stamped);
+      localStorage.setItem(BUSINESS_KNOWLEDGE_KEY, JSON.stringify(stamped));
+      notice.success("Business Knowledge imported and saved.", "Import complete");
+    };
+
+    if (file.name.toLowerCase().endsWith(".csv")) {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (parsed) => {
+          const row = (parsed.data as Record<string, any>[])[0] || {};
+          finish(Object.fromEntries(BUSINESS_KNOWLEDGE_FIELDS.map(([key, label]) => [key, findImportValue(row, label, key)]).filter(([, value]) => value)) as Partial<BusinessKnowledge>);
+        },
+        error: (error) => notice.error(error.message || "Could not import Business Knowledge.", "Import failed"),
+      });
+      return;
+    }
+
+    file.text().then((text) => {
+      const parsed = parseKeyValueText(text, BUSINESS_KNOWLEDGE_FIELDS);
+      finish(Object.keys(parsed).length ? parsed as Partial<BusinessKnowledge> : { businessDescription: text.trim() });
+    }).catch(() => notice.error("Could not read Business Knowledge file.", "Import failed"));
+  }
+
+  function importAppMindsetFile(file: File) {
+    const finish = (next: Partial<AppMindset>) => {
+      const stamped = { ...appMindset, ...next, lastUpdated: new Date().toISOString() };
+      setAppMindset(stamped);
+      localStorage.setItem(APP_MINDSET_KEY, JSON.stringify(stamped));
+      notice.success("App Mindset imported and saved.", "Import complete");
+    };
+
+    if (file.name.toLowerCase().endsWith(".csv")) {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (parsed) => {
+          const row = (parsed.data as Record<string, any>[])[0] || {};
+          finish(Object.fromEntries(APP_MINDSET_FIELDS.map(([key, label]) => [key, findImportValue(row, label, key)]).filter(([, value]) => value)) as Partial<AppMindset>);
+        },
+        error: (error) => notice.error(error.message || "Could not import App Mindset.", "Import failed"),
+      });
+      return;
+    }
+
+    file.text().then((text) => {
+      const parsed = parseKeyValueText(text, APP_MINDSET_FIELDS);
+      finish(Object.keys(parsed).length ? parsed as Partial<AppMindset> : { emailPhilosophy: text.trim() });
+    }).catch(() => notice.error("Could not read App Mindset file.", "Import failed"));
+  }
+
+  function importOfferLibraryFile(file: File) {
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      notice.warning("Offer Library import expects a CSV with offer columns.", "CSV required");
+      return;
+    }
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (parsed) => {
+        const imported = (parsed.data as Record<string, any>[]).map((row, index) => {
+          const offer = Object.fromEntries(OFFER_FIELDS.map(([key, label]) => [key, findImportValue(row, label, key)])) as Partial<OfferItem>;
+          return {
+            ...DEFAULT_OFFERS[0],
+            ...offer,
+            id: findImportValue(row, "ID", "id") || `offer-import-${Date.now()}-${index}`,
+            offerName: offer.offerName || `Imported Offer ${index + 1}`,
+            status: (findImportValue(row, "Status", "status") as OfferItem["status"]) || "Draft",
+            lastUpdated: new Date().toISOString(),
+          };
+        });
+        const next = [...imported, ...offers];
+        setOffers(next);
+        setSelectedOfferId(imported[0]?.id || selectedOfferId);
+        localStorage.setItem(OFFER_LIBRARY_KEY, JSON.stringify(next));
+        notice.success(`${imported.length} offers imported and saved.`, "Offer import complete");
+      },
+      error: (error) => notice.error(error.message || "Could not import Offer Library.", "Import failed"),
+    });
+  }
+
   async function handleSendTestChat() {
     const prompt = chatPrompt.trim();
     if (!prompt) {
@@ -499,6 +632,18 @@ export default function BrainCenterPage() {
                   <p className="text-xs font-bold uppercase tracking-widest text-blue-700">Brain Usage</p>
                   <p className="mt-1 text-sm text-blue-700">ORC, SENTINEL, SCRIBE, and LEXI use this as approved company truth. Missing knowledge lowers strategy confidence and draft QA.</p>
                 </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Upload Business Knowledge</p>
+                      <p className="text-xs text-slate-500">Import `.csv`, `.txt`, or `.md`. CSV headers can match field names like Company Name, Approved Claims, Banned Claims, FAQs.</p>
+                    </div>
+                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                      <Download className="h-4 w-4" /> Upload File
+                      <input type="file" accept=".csv,.txt,.md" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) importBusinessKnowledgeFile(file); e.currentTarget.value = ""; }} />
+                    </label>
+                  </div>
+                </div>
                 <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
                   <div>
                     <p className="text-sm font-bold text-slate-900">Status: {contextStatus(businessKnowledge as any, ["companyName", "mainValueProposition", "approvedPositioningStatement"])}</p>
@@ -507,13 +652,7 @@ export default function BrainCenterPage() {
                   <button onClick={saveBusinessKnowledge} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><Save className="h-4 w-4" /> Save Business Knowledge</button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {[
-                    ["companyName", "Company Name"], ["website", "Website"], ["industry", "Industry"], ["businessDescription", "Business Description"],
-                    ["productsServices", "Products / Services"], ["targetCustomers", "Target Customers"], ["idealCustomerProfile", "Ideal Customer Profile"], ["customerPainPoints", "Customer Pain Points"],
-                    ["mainValueProposition", "Main Value Proposition"], ["competitiveAdvantages", "Competitive Advantages"], ["approvedPositioningStatement", "Approved Positioning Statement"], ["approvedClaims", "Approved Claims"],
-                    ["bannedClaims", "Banned Claims"], ["faqs", "FAQs"], ["caseStudies", "Case Studies / Proof Points"], ["complianceNotes", "Compliance Notes"],
-                    ["internalTerminology", "Internal Terminology"], ["wordsToAvoid", "Words to Avoid"], ["customerObjections", "Customer Objections"], ["preferredCtaLanguage", "Preferred CTA Language"],
-                  ].map(([key, label]) => (
+                  {BUSINESS_KNOWLEDGE_FIELDS.map(([key, label]) => (
                     <label key={key} className="space-y-1">
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
                       <textarea
@@ -532,6 +671,18 @@ export default function BrainCenterPage() {
                   <p className="text-xs font-bold uppercase tracking-widest text-violet-700">Brain Usage</p>
                   <p className="mt-1 text-sm text-violet-700">SENTINEL uses this for strategy, SCRIBE for writing, and LEXI for scoring, duplicate subject checks, banned phrases, and approval threshold rules.</p>
                 </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Upload App Mindset</p>
+                      <p className="text-xs text-slate-500">Import `.csv`, `.txt`, or `.md`. Use key/value lines like Tone Principles: professional and practical.</p>
+                    </div>
+                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                      <Download className="h-4 w-4" /> Upload File
+                      <input type="file" accept=".csv,.txt,.md" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) importAppMindsetFile(file); e.currentTarget.value = ""; }} />
+                    </label>
+                  </div>
+                </div>
                 <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
                   <div>
                     <p className="text-sm font-bold text-slate-900">Status: {contextStatus(appMindset as any, ["primaryGoal", "emailPhilosophy", "qualityThreshold"])}</p>
@@ -540,12 +691,7 @@ export default function BrainCenterPage() {
                   <button onClick={saveAppMindset} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><Save className="h-4 w-4" /> Save App Mindset</button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {[
-                    ["primaryGoal", "Primary Goal of the App"], ["emailPhilosophy", "Email Philosophy"], ["salesPhilosophy", "Sales Philosophy"], ["tonePrinciples", "Tone Principles"],
-                    ["structureRules", "Structure Rules"], ["ctaPhilosophy", "CTA Philosophy"], ["personalizationRules", "Personalization Rules"], ["deliverabilityRules", "Deliverability Rules"],
-                    ["qualityThreshold", "Quality Threshold"], ["humanApprovalRules", "Human Approval Rules"], ["noInventedFactsRule", "No Invented Facts Rule"], ["riskFramingRules", "Risk Framing Rules"],
-                    ["bannedPhrases", "Banned Phrases"], ["preferredEmailFramework", "Preferred Email Framework"], ["outputFormatRules", "Output Format Rules"],
-                  ].map(([key, label]) => (
+                  {APP_MINDSET_FIELDS.map(([key, label]) => (
                     <label key={key} className="space-y-1">
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
                       <textarea
@@ -564,6 +710,18 @@ export default function BrainCenterPage() {
                   <p className="text-xs font-bold uppercase tracking-widest text-emerald-700">Brain Usage</p>
                   <p className="mt-1 text-sm text-emerald-700">ORC validates offer status, SENTINEL builds the angle from offer triggers, SCRIBE describes the offer accurately, and LEXI blocks banned claims.</p>
                 </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Upload Offer Library</p>
+                      <p className="text-xs text-slate-500">Import a `.csv` with one offer per row. Headers can match Offer Name, Description, CTA Options, Banned Claims, Status, and related fields.</p>
+                    </div>
+                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                      <Download className="h-4 w-4" /> Upload CSV
+                      <input type="file" accept=".csv" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) importOfferLibraryFile(file); e.currentTarget.value = ""; }} />
+                    </label>
+                  </div>
+                </div>
                 <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex-1">
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Selected Offer</label>
@@ -578,13 +736,7 @@ export default function BrainCenterPage() {
                 </div>
                 {selectedOffer && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {[
-                      ["offerName", "Offer Name"], ["offerType", "Offer Type"], ["description", "Description"], ["targetSegment", "Target Segment"],
-                      ["bestFitCustomerType", "Best-Fit Customer Type"], ["bestFitIndustries", "Best-Fit Industries"], ["painPointsSolved", "Pain Points Solved"], ["upsellTriggers", "Upsell Triggers"],
-                      ["valueOutcomes", "Value Outcomes"], ["approvedClaims", "Approved Claims"], ["bannedClaims", "Banned Claims"], ["ctaOptions", "CTA Options"],
-                      ["discoveryCallLink", "Discovery Call Link"], ["leadMagnetLink", "Lead Magnet Link"], ["pricingNotes", "Pricing Notes"], ["qualificationRules", "Qualification Rules"],
-                      ["redFlags", "Red Flags"], ["relatedCampaignPlaybooks", "Related Campaign Playbooks"],
-                    ].map(([key, label]) => (
+                    {OFFER_FIELDS.map(([key, label]) => (
                       <label key={key} className="space-y-1">
                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
                         <textarea
