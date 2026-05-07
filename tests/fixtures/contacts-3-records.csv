@@ -1,0 +1,4 @@
+Name,Company,Email,Current Product,Renewal Date,Do Not Contact,Notes
+Avery Valid,ValidCo,avery.valid@example.com,Pro Plan,2026-08-15,false,Valid record for generation
+Mina Missing,Missing Email Co,,Growth Plan,2026-09-01,false,Missing email should be flagged
+Dana DNC,DNC Industries,dana.dnc@example.com,Starter,2026-10-20,true,Customer requested no contact

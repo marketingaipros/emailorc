@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import * as bcrypt from "bcryptjs";
-import { crypto } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 export async function GET() {
   try {
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
             email,
             organizationId,
             role,
-            inviteToken: crypto.randomUUID(),
+            inviteToken: randomUUID(),
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
             status: "PENDING",
           },

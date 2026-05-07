@@ -175,7 +175,7 @@ export default function AdminConsole() {
 
   useEffect(() => {
     const role = localStorage.getItem("userRole");
-    if (role !== "SUPER_ADMIN" && role !== "CLIENT_ADMIN") {
+    if (role !== "SUPER_ADMIN") {
       router.push("/mvp");
       return;
     }

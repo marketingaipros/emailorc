@@ -162,7 +162,7 @@ export function Header() {
                 </div>
 
                 <div className="border-t border-slate-50 p-1.5">
-                  {(role === "SUPER_ADMIN" || role === "CLIENT_ADMIN") && (
+                  {role === "SUPER_ADMIN" && (
                     <button 
                       onClick={handleSwitchMode}
                       className="w-full flex items-center gap-3 px-3 py-2 text-sm text-indigo-600 font-bold hover:bg-indigo-50 rounded-xl transition-all"

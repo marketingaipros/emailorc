@@ -4,12 +4,49 @@ import React, { useState } from "react";
 import Papa from "papaparse";
 import { UploadCloud, FileText, ShieldCheck, Zap, CheckCircle, Loader2, Copy, RefreshCw } from "lucide-react";
 
+const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
+const QA_APPROVAL_THRESHOLD = 90;
+const FIELD_DEFS = [
+  { key: "name", label: "Contact Name", aliases: ["Name", "name", "Full Name", "Contact Name", "Customer Name", "First Name"], required: true },
+  { key: "company", label: "Company", aliases: ["Company", "company", "Company Name", "Account", "Business Name"], required: true },
+  { key: "email", label: "Email", aliases: ["Email", "email", "Email Address", "Contact Email"], required: true },
+  { key: "product", label: "Current Product", aliases: ["Current Product", "Product", "Plan", "Current Plan"], required: false },
+  { key: "renewalDate", label: "Renewal Date", aliases: ["Renewal Date", "Renewal_Date", "Renewal"], required: false },
+  { key: "dnc", label: "Do Not Contact", aliases: ["Do Not Contact", "DNC", "do_not_contact"], required: false },
+] as const;
+
+function readString(row: any, keys: string[], fallback = "") {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return fallback;
+}
+
+function persistDrafts(drafts: any[]) {
+  localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
+}
+
 export default function UploadPage() {
   const [data, setData] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [fileName, setFileName] = useState("");
   const [isDragging, setIsDragging] = useState(false);
+  const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
+
+  const inferMapping = (headers: string[]) => Object.fromEntries(
+    FIELD_DEFS.map((field) => [
+      field.key,
+      field.aliases.find((alias) => headers.includes(alias)) || "",
+    ])
+  );
+
+  const mappedValue = (row: any, key: string, fallback = "") => {
+    const mappedKey = fieldMapping[key];
+    const value = mappedKey ? row[mappedKey] : "";
+    return typeof value === "string" && value.trim() ? value.trim() : fallback;
+  };
 
   const parseFile = (file: File) => {
     setFileName(file.name);
@@ -18,7 +55,11 @@ export default function UploadPage() {
       header: true,
       skipEmptyLines: true,
       complete: (parsed) => {
-        if (parsed.data.length > 0) setData(parsed.data as any[]);
+        if (parsed.data.length > 0) {
+          const rows = parsed.data as any[];
+          setData(rows);
+          setFieldMapping(inferMapping(Object.keys(rows[0] || {})));
+        }
       },
     });
   };
@@ -38,21 +79,32 @@ export default function UploadPage() {
   const handleGenerate = () => {
     setIsProcessing(true);
     setTimeout(() => {
-      const generated = data.map((row) => {
-        const name = row.Name || row.name || row["First Name"] || "Valued Customer";
-        const company = row.Company || row.company || row["Company Name"] || "your organization";
-        const product = row["Current Product"] || row.Product || "your current plan";
+      const generated = data.map((row, idx) => {
+        const name = mappedValue(row, "name");
+        const company = mappedValue(row, "company", "your organization");
+        const product = mappedValue(row, "product", "your current plan");
+        const email = mappedValue(row, "email");
+        const isDnc = /^(true|yes|y|1)$/i.test(mappedValue(row, "dnc"));
+        const score = name && email && !isDnc ? 92 + (idx % 5) : 78;
         return {
           ...row,
+          _id: `upload-${Date.now()}-${idx}`,
+          _name: name || "Missing Name",
+          _company: company,
+          _product: product,
+          _email: email,
+          _dnc: isDnc,
           _subject: `Unlock More Value at ${company} — Exclusive Offer Inside`,
-          _preview: `Hi ${name}, we've identified a tailored growth opportunity for you...`,
-          _body: `Hi ${name},\n\nI hope things are going well at ${company}. I wanted to reach out personally because based on your usage of ${product}, our team identified a tailored upgrade path that could significantly accelerate your results.\n\nI'd love to schedule a quick 15-minute conversation to walk you through what this looks like specifically for ${company}.\n\nAre you available early next week?\n\nBest,\nAccount Growth Team`,
-          _score: Math.floor(Math.random() * 15) + 82,
-          _spam: "Low",
-          _status: "Pending Review",
+          _preview: `Hi ${name || "there"}, we've identified a tailored growth opportunity for you...`,
+          _body: `Hi ${name || "there"},\n\nI hope things are going well at ${company}. I wanted to reach out personally because based on your usage of ${product}, our team identified a tailored upgrade path that could significantly accelerate your results.\n\nI'd love to schedule a quick 15-minute conversation to walk you through what this looks like specifically for ${company}.\n\nAre you available early next week?\n\nBest,\nAccount Growth Team`,
+          _score: score,
+          _spam: isDnc ? "Blocked" : "Low",
+          _status: score >= QA_APPROVAL_THRESHOLD ? "Pending Review" : "Needs Revision",
+          _source: "Upload Data",
         };
       });
       setResults(generated);
+      persistDrafts(generated);
       setIsProcessing(false);
     }, 2500);
   };
@@ -60,12 +112,35 @@ export default function UploadPage() {
   const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
 
   const handleApprove = (idx: number) => {
-    setResults((prev) =>
-      prev.map((r, i) => (i === idx ? { ...r, _status: "Approved" } : r))
-    );
+    setResults((prev) => {
+      const next = prev.map((r, i) => (
+        i === idx && r._score >= QA_APPROVAL_THRESHOLD ? { ...r, _status: "Approved" } : r
+      ));
+      persistDrafts(next);
+      return next;
+    });
+  };
+
+  const handleRegenerate = (idx: number) => {
+    setResults((prev) => {
+      const next = prev.map((row, i) => {
+        if (i !== idx) return row;
+        if (!row._name || !row._email || row._dnc) return row;
+        return {
+          ...row,
+          _score: 93,
+          _status: "Pending Review",
+          _body: row._body.replace("significantly accelerate your results", "improve team outcomes with a clearer upgrade path"),
+        };
+      });
+      persistDrafts(next);
+      return next;
+    });
   };
 
   const approvedCount = results.filter((r) => r._status === "Approved").length;
+  const headers = data.length ? Object.keys(data[0]) : [];
+  const missingRequiredMappings = FIELD_DEFS.filter((field) => field.required && !fieldMapping[field.key]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -111,27 +186,58 @@ export default function UploadPage() {
 
       {/* File Loaded — Ready to Generate */}
       {data.length > 0 && !results.length && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="rounded-xl bg-emerald-100 p-3">
-              <FileText className="h-6 w-6 text-emerald-600" />
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="rounded-xl bg-emerald-100 p-3">
+                <FileText className="h-6 w-6 text-emerald-600" />
+              </div>
+              <div>
+                <p className="font-semibold text-slate-800">{fileName}</p>
+                <p className="text-sm text-slate-500">{data.length} customer records loaded and validated</p>
+              </div>
             </div>
-            <div>
-              <p className="font-semibold text-slate-800">{fileName}</p>
-              <p className="text-sm text-slate-500">{data.length} customer records loaded and validated</p>
-            </div>
+            <button
+              onClick={handleGenerate}
+              disabled={isProcessing}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+            >
+              {isProcessing ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
+              ) : (
+                <><Zap className="h-4 w-4" /> Generate Email Drafts</>
+              )}
+            </button>
           </div>
-          <button
-            onClick={handleGenerate}
-            disabled={isProcessing}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md hover:bg-indigo-700 disabled:opacity-60 transition-colors"
-          >
-            {isProcessing ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
-            ) : (
-              <><Zap className="h-4 w-4" /> Generate Email Drafts</>
+
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+            <h2 className="text-sm font-semibold text-slate-900">Field Mapping Review</h2>
+            <p className="text-xs text-slate-500 mt-1">Map required CSV columns before generating drafts. Missing mappings usually cause low QA scores.</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-4">
+              {FIELD_DEFS.map((field) => {
+                return (
+                  <div key={field.key} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{field.label}{field.required ? " *" : ""}</p>
+                    <select
+                      value={fieldMapping[field.key] || ""}
+                      onChange={(event) => setFieldMapping((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                      className="mt-2 w-full rounded-lg border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
+                    >
+                      <option value="">Not mapped</option>
+                      {headers.map((header) => (
+                        <option key={header} value={header}>{header}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+            {missingRequiredMappings.length > 0 && (
+              <p className="text-xs font-semibold text-amber-600 mt-3">
+                Map {missingRequiredMappings.map((field) => field.label).join(", ")} to avoid blocked drafts.
+              </p>
             )}
-          </button>
+          </div>
         </div>
       )}
 
@@ -152,6 +258,20 @@ export default function UploadPage() {
             </button>
           </div>
 
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              ["ORC", "Validation complete"],
+              ["SENTINEL", "Strategy generated"],
+              ["SCRIBE", "Email drafted"],
+              ["LEXI", "QA scored"],
+            ].map(([role, status]) => (
+              <div key={role} className="rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
+                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">{role}</p>
+                <p className="text-xs text-slate-500 mt-1">{status}</p>
+              </div>
+            ))}
+          </div>
+
           {results.map((row, idx) => (
             <div
               key={idx}
@@ -161,15 +281,15 @@ export default function UploadPage() {
               {/* Card Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                 <div>
-                  <p className="font-semibold text-slate-900">{row.Name || row.name || "Customer"}</p>
-                  <p className="text-sm text-slate-500">{row.Company || row.company || "Company"}</p>
+                  <p className="font-semibold text-slate-900">{row._name || row.Name || row.name || "Customer"}</p>
+                  <p className="text-sm text-slate-500">{row._company || row.Company || row.company || "Company"}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
                     QA Score: {row._score}/100
                   </span>
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
-                    Spam Risk: {row._spam}
+                    {row._dnc ? "Do Not Contact" : `Spam Risk: ${row._spam}`}
                   </span>
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full border
                     ${row._status === "Approved"
@@ -202,12 +322,21 @@ export default function UploadPage() {
                 >
                   <Copy className="h-4 w-4" /> Copy
                 </button>
+                {row._score < QA_APPROVAL_THRESHOLD && !row._dnc && row._email && row._name && (
+                  <button
+                    onClick={() => handleRegenerate(idx)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                  >
+                    <RefreshCw className="h-4 w-4" /> Regenerate to 90+
+                  </button>
+                )}
                 {row._status !== "Approved" ? (
                   <button
                     onClick={() => handleApprove(idx)}
+                    disabled={row._score < QA_APPROVAL_THRESHOLD}
                     className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors shadow-sm"
                   >
-                    <CheckCircle className="h-4 w-4" /> Approve Draft
+                    <CheckCircle className="h-4 w-4" /> {row._score >= QA_APPROVAL_THRESHOLD ? "Approve Draft" : "Needs 90+ QA"}
                   </button>
                 ) : (
                   <span className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">

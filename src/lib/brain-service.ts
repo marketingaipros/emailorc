@@ -37,22 +37,22 @@ export async function checkAndDeductCredits(params: {
   // 1. Get Organization
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
-    select: { creditBalance: true, isActive: true, subscriptionStatus: true }
+    select: { aiCredits: true, status: true, subscriptionStatus: true }
   });
 
-  if (!org || !org.isActive) {
+  if (!org || org.status !== "ACTIVE") {
     throw new Error("Organization is inactive or not found.");
   }
 
   // 2. Check Balance
-  if (org.creditBalance < cost) {
-    throw new Error(`Insufficient AI Credits. This action costs ${cost} credits, but you have ${org.creditBalance} remaining.`);
+  if (org.aiCredits < cost) {
+    throw new Error(`Insufficient AI Credits. This action costs ${cost} credits, but you have ${org.aiCredits} remaining.`);
   }
 
   // 3. Deduct Credits
   await prisma.organization.update({
     where: { id: orgId },
-    data: { creditBalance: { decrement: cost } }
+    data: { aiCredits: { decrement: cost } }
   });
 
   // 4. Log Usage (Placeholder tokens for demo, usually passed from API response)
@@ -73,13 +73,13 @@ export async function checkAndDeductCredits(params: {
     }
   });
 
-  return { success: true, remaining: org.creditBalance - cost, logId: log.id };
+  return { success: true, remaining: org.aiCredits - cost, logId: log.id };
 }
 
 export async function getOrgCredits(orgId: string) {
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
-    select: { creditBalance: true }
+    select: { aiCredits: true }
   });
-  return org?.creditBalance || 0;
+  return org?.aiCredits || 0;
 }

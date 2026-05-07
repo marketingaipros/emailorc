@@ -124,10 +124,23 @@ export default function BrainCenterPage() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   function handleSaveApiKey() {
+    const trimmed = apiKey.trim();
+    const validDemoKey = trimmed === "sk_demo_9a8b7c6d5e4f3g2h1i0j";
+    const validOpenRouterShape = trimmed.startsWith("sk-or-v1-") && trimmed.length >= 48;
+
+    if (!validDemoKey && !validOpenRouterShape) {
+      setApiKeySaved(false);
+      setConnectionStatus("Invalid API Key");
+      setLastTested(new Date().toLocaleString());
+      return;
+    }
+
     setIsSaving(true);
     setTimeout(() => {
+      setApiKey(trimmed);
       setIsSaving(false);
       setApiKeySaved(true);
+      setConnectionStatus("Not Connected");
     }, 800);
   }
 
@@ -141,12 +154,15 @@ export default function BrainCenterPage() {
         body: JSON.stringify({
           provider: modelProvider,
           environment: envConfig.mode === "DEMO" ? "Demo" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production",
-          selected_model_mode: modelMode
+          selected_model_mode: modelMode,
+          api_key: apiKey,
         })
       });
       const data = await response.json();
       if (data.status === "connected") {
         setConnectionStatus("Connected");
+      } else if (data.status === "invalid_api_key") {
+        setConnectionStatus("Invalid API Key");
       } else {
         setConnectionStatus("Error");
       }

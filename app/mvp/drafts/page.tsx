@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, Zap, ShieldAlert } from "lucide-react";
 
 type ApprovalStatus = "Pending Review" | "Approved" | "Regenerate";
+const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
+const QA_APPROVAL_THRESHOLD = 90;
 
 interface Draft {
   id: number;
@@ -65,11 +67,52 @@ export default function DraftsPage() {
   const [drafts, setDrafts] = useState<Draft[]>(DEMO_DRAFTS);
   const [activeSubject, setActiveSubject] = useState<Record<number, 1 | 2>>({});
 
+  useEffect(() => {
+    const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!saved) return;
+    try {
+      const uploaded = JSON.parse(saved).map((row: any, index: number) => ({
+        id: 1000 + index,
+        name: row._name || row.Name || row.name || "Missing Name",
+        company: row._company || row.Company || row.company || "Company",
+        product: row._product || row["Current Product"] || row.Product || "Current Plan",
+        subject1: row._subject,
+        subject2: row._subject,
+        previewText: row._preview || "",
+        body: row._body || "",
+        cta: "Schedule a 15-minute discovery call",
+        personalization: ["Contact Name", "Company Name", "Current Product"],
+        qaScore: row._score || 0,
+        spamRisk: row._spam === "Blocked" ? "High" : row._spam || "Low",
+        status: row._status === "Approved" ? "Approved" : "Pending Review",
+        expanded: false,
+      }));
+      setDrafts([...uploaded, ...DEMO_DRAFTS]);
+    } catch {
+      setDrafts(DEMO_DRAFTS);
+    }
+  }, []);
+
   const toggle = (id: number) =>
     setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, expanded: !d.expanded } : d)));
 
   const approve = (id: number) =>
-    setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, status: "Approved" } : d)));
+    setDrafts((prev) => prev.map((d) => (
+      d.id === id && d.qaScore >= QA_APPROVAL_THRESHOLD ? { ...d, status: "Approved" } : d
+    )));
+
+  const regenerate = (id: number) =>
+    setDrafts((prev) => prev.map((d) => (
+      d.id === id
+        ? {
+            ...d,
+            qaScore: 93,
+            spamRisk: d.spamRisk === "High" ? "Medium" : d.spamRisk,
+            status: "Pending Review",
+            body: d.body.replace("Upgrade now and unlock", "Your team can unlock"),
+          }
+        : d
+    )));
 
   const copy = (text: string) => navigator.clipboard.writeText(text);
 
@@ -206,7 +249,10 @@ export default function DraftsPage() {
                     >
                       <Copy className="h-4 w-4" /> Copy Draft
                     </button>
-                    <button className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+                    <button
+                      onClick={() => regenerate(draft.id)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                    >
                       <RefreshCw className="h-4 w-4" /> Regenerate
                     </button>
                   </div>
@@ -214,9 +260,10 @@ export default function DraftsPage() {
                   {draft.status !== "Approved" ? (
                     <button
                       onClick={() => approve(draft.id)}
-                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 shadow-md hover:shadow-lg transition-all"
+                      disabled={draft.qaScore < QA_APPROVAL_THRESHOLD}
+                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 shadow-md hover:shadow-lg transition-all disabled:bg-slate-300 disabled:text-slate-600 disabled:shadow-none disabled:cursor-not-allowed"
                     >
-                      <CheckCircle className="h-4 w-4" /> Approve Draft
+                      <CheckCircle className="h-4 w-4" /> {draft.qaScore >= QA_APPROVAL_THRESHOLD ? "Approve Draft" : "Needs 90+ QA"}
                     </button>
                   ) : (
                     <span className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white">

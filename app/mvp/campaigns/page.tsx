@@ -65,6 +65,9 @@ export default function CampaignBoardPage() {
   const [dragging, setDragging] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<ColId | null>(null);
 
+  const moveCard = (id: number, col: ColId) => {
+    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, column: col } : c)));
+  };
   const onDragStart = (id: number) => setDragging(id);
   const onDragOver = (e: React.DragEvent, col: ColId) => {
     e.preventDefault();
@@ -72,7 +75,7 @@ export default function CampaignBoardPage() {
   };
   const onDrop = (col: ColId) => {
     if (dragging !== null) {
-      setCards((prev) => prev.map((c) => (c.id === dragging ? { ...c, column: col } : c)));
+      moveCard(dragging, col);
     }
     setDragging(null);
     setDragOver(null);
@@ -100,6 +103,7 @@ export default function CampaignBoardPage() {
             <div
               key={col}
               className="flex flex-col flex-shrink-0 w-56"
+              data-testid={`campaign-column-${col}`}
               onDragOver={(e) => onDragOver(e, col)}
               onDrop={() => onDrop(col)}
             >
@@ -121,6 +125,7 @@ export default function CampaignBoardPage() {
                   <div
                     key={card.id}
                     draggable
+                    data-testid={`campaign-card-${card.name}`}
                     onDragStart={() => onDragStart(card.id)}
                     onDragEnd={onDragEnd}
                     className={`bg-white rounded-xl border border-slate-100 p-3 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md hover:border-indigo-200 transition-all
@@ -141,6 +146,21 @@ export default function CampaignBoardPage() {
                         {card.owner[0]}
                       </span>
                     </div>
+                    <label className="mt-3 block">
+                      <span className="sr-only">Move {card.name}</span>
+                      <select
+                        aria-label={`Move ${card.name}`}
+                        value={card.column}
+                        onChange={(e) => moveCard(card.id, e.target.value as ColId)}
+                        className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600 outline-none transition-colors hover:border-indigo-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                      >
+                        {COLS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 ))}
 
