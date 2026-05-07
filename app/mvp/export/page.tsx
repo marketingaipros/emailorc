@@ -5,6 +5,7 @@ import { Download, FileSpreadsheet, FileText, Mail, Users, XCircle, MessageSquar
 import { useNotice } from "@/components/notice/NoticeProvider";
 
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
+const DRAFT_STATE_KEY = "emailorcDraftState";
 
 const EXPORT_OPTIONS = [
   { id: "approved-csv",   label: "Approved Drafts",      description: "All approved email drafts ready for sending",       format: "CSV",              count: 2, color: "bg-emerald-100", icon: <CheckCircle className="h-5 w-5 text-emerald-600" /> },
@@ -22,8 +23,22 @@ export default function ExportCenterPage() {
 
   const exportFile = (id: string, format: string) => {
     const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
+    const savedState = localStorage.getItem(DRAFT_STATE_KEY);
     const rows = saved ? JSON.parse(saved) : [];
-    const approvedRows = rows.filter((row: any) => row._status === "Approved");
+    const stateRows = savedState ? Object.values(JSON.parse(savedState) as Record<string, any>) : [];
+    const approvedRows = [
+      ...rows.filter((row: any) => row._status === "Approved"),
+      ...stateRows.filter((row: any) => row.status === "Approved" || row._status === "Approved").map((row: any) => ({
+        _name: row.name || row._name,
+        _company: row.company || row._company,
+        _email: row.email || row._email || "",
+        _subject: row.subject1 || row._subject,
+        _subject2: row.subject2 || row._subject2,
+        _body: row.body || row._body,
+        _score: row.qaScore || row._score,
+        _status: "Approved",
+      })),
+    ];
     const sourceRows = approvedRows.length ? approvedRows : [
       { _name: "Sarah Johnson", _company: "Apex Logistics", _email: "sarah@apexlogistics.com", _subject: "Unlock Enterprise-Level Growth for Apex Logistics", _body: "Approved demo draft", _score: 94, _status: "Approved" },
       { _name: "Marcus Webb", _company: "Greenfield Capital", _email: "m.webb@greenfield.com", _subject: "See what Pro + Analytics unlocks", _body: "Approved demo draft", _score: 92, _status: "Approved" },

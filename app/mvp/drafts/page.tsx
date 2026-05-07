@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, Zap, ShieldAlert } from "lucide-react";
+import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, ShieldAlert, AlertTriangle } from "lucide-react";
 import { useNotice } from "@/components/notice/NoticeProvider";
 
 type ApprovalStatus = "Pending Review" | "Approved" | "Regenerate";
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
+const DRAFT_STATE_KEY = "emailorcDraftState";
 const QA_APPROVAL_THRESHOLD = 90;
 
 interface Draft {
@@ -23,6 +24,10 @@ interface Draft {
   spamRisk: "Low" | "Medium" | "High";
   status: ApprovalStatus;
   expanded: boolean;
+  revisionCount?: number;
+  qaIssues?: string[];
+  revisionsMade?: string[];
+  sourceIndex?: number;
 }
 
 const SPAM_COLOR: Record<string, string> = {
@@ -68,28 +73,88 @@ export default function DraftsPage() {
   const notice = useNotice();
   const [drafts, setDrafts] = useState<Draft[]>(DEMO_DRAFTS);
   const [activeSubject, setActiveSubject] = useState<Record<number, 1 | 2>>({});
+  const [regeneratingId, setRegeneratingId] = useState<number | null>(null);
+
+  function buildQaIssues(draft: Draft) {
+    const issues = [...(draft.qaIssues || [])];
+    if (draft.subject1.trim().toLowerCase() === draft.subject2.trim().toLowerCase()) issues.push("Duplicate subject lines");
+    if (draft.qaScore < QA_APPROVAL_THRESHOLD) issues.push("QA score below threshold");
+    if (draft.spamRisk === "High") issues.push("Spam risk is high");
+    if (!draft.name || !draft.company || !draft.body || !draft.subject1 || !draft.subject2) issues.push("Draft missing required fields");
+    return Array.from(new Set(issues));
+  }
+
+  function approvalBlockReason(draft: Draft) {
+    const role = localStorage.getItem("userRole") || "VIEWER";
+    if (draft.status === "Approved") return "Draft already approved";
+    if (!["SUPER_ADMIN", "CLIENT_ADMIN", "REVIEWER"].includes(role)) return "User does not have approval permission";
+    if (!draft.name || !draft.company || !draft.body || !draft.subject1 || !draft.subject2) return "Draft missing required fields";
+    if (draft.subject1.trim().toLowerCase() === draft.subject2.trim().toLowerCase()) return "Duplicate subject lines";
+    if (draft.qaScore < QA_APPROVAL_THRESHOLD) return "QA score below threshold";
+    if (!["Low", "Medium"].includes(draft.spamRisk)) return "Draft spam risk is too high";
+    return "";
+  }
+
+  function persistAllDrafts(nextDrafts: Draft[]) {
+    localStorage.setItem(DRAFT_STATE_KEY, JSON.stringify(Object.fromEntries(nextDrafts.map((draft) => [String(draft.id), draft]))));
+    const uploaded = nextDrafts
+      .filter((draft) => draft.id >= 1000)
+      .map((draft) => ({
+        _id: `draft-${draft.id}`,
+        _name: draft.name,
+        _company: draft.company,
+        _product: draft.product,
+        _email: "",
+        _subject: draft.subject1,
+        _subject2: draft.subject2,
+        _preview: draft.previewText,
+        _body: draft.body,
+        _score: draft.qaScore,
+        _spam: draft.spamRisk,
+        _status: draft.status,
+        _revision_count: draft.revisionCount || 0,
+        _qa_issues: buildQaIssues(draft),
+      }));
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(uploaded));
+  }
 
   useEffect(() => {
     const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
-    if (!saved) return;
+    const savedState = localStorage.getItem(DRAFT_STATE_KEY);
+    const stateById = savedState ? JSON.parse(savedState) : {};
+    const demoDrafts = DEMO_DRAFTS.map((draft) => ({ ...draft, ...(stateById[String(draft.id)] || {}) }));
+    if (!saved) {
+      setDrafts(demoDrafts);
+      return;
+    }
     try {
-      const uploaded = JSON.parse(saved).map((row: any, index: number) => ({
+      const uploaded = JSON.parse(saved).map((row: any, index: number) => {
+        const subject1 = row._subject || row.subject1 || "";
+        const subject2 = row._subject2 || row.subject2 || `${row._company || row.Company || "Your team"}: a softer next step`;
+        const duplicateSubjects = subject1.trim().toLowerCase() === subject2.trim().toLowerCase();
+        return {
         id: 1000 + index,
         name: row._name || row.Name || row.name || "Missing Name",
         company: row._company || row.Company || row.company || "Company",
         product: row._product || row["Current Product"] || row.Product || "Current Plan",
-        subject1: row._subject,
-        subject2: row._subject,
+        subject1,
+        subject2,
         previewText: row._preview || "",
         body: row._body || "",
         cta: "Schedule a 15-minute discovery call",
         personalization: ["Contact Name", "Company Name", "Current Product"],
-        qaScore: row._score || 0,
+        qaScore: duplicateSubjects ? Math.min(Number(row._score || 0), 89) : row._score || 0,
         spamRisk: row._spam === "Blocked" ? "High" : row._spam || "Low",
-        status: row._status === "Approved" ? "Approved" : "Pending Review",
+        status: row._status === "Approved" && !duplicateSubjects ? "Approved" : "Pending Review",
         expanded: false,
-      }));
-      setDrafts([...uploaded, ...DEMO_DRAFTS]);
+        revisionCount: row._revision_count || 0,
+        qaIssues: duplicateSubjects ? ["Duplicate subject lines"] : row._qa_issues || [],
+        revisionsMade: row._revisions_made || [],
+        sourceIndex: index,
+      };
+      });
+      const mergedUploaded = uploaded.map((draft: Draft) => ({ ...draft, ...(stateById[String(draft.id)] || {}) }));
+      setDrafts([...mergedUploaded, ...demoDrafts]);
     } catch {
       setDrafts(DEMO_DRAFTS);
     }
@@ -98,31 +163,73 @@ export default function DraftsPage() {
   const toggle = (id: number) =>
     setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, expanded: !d.expanded } : d)));
 
-  const approve = (id: number) => {
+  const approve = async (id: number) => {
     const draft = drafts.find((item) => item.id === id);
-    if (draft && draft.qaScore < QA_APPROVAL_THRESHOLD) {
-      notice.warning("Draft approval blocked. QA score must be 90 or higher.", "Approval blocked");
+    if (!draft) return;
+    const blockReason = approvalBlockReason(draft);
+    if (blockReason) {
+      notice.warning(blockReason, "Approval blocked");
       return;
     }
-    setDrafts((prev) => prev.map((d) => (
-      d.id === id && d.qaScore >= QA_APPROVAL_THRESHOLD ? { ...d, status: "Approved" } : d
-    )));
-    notice.success("Draft approved.", "Approval complete");
+    try {
+      const response = await fetch("/api/drafts/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          draft_id: String(draft.id),
+          qa_score: draft.qaScore,
+          spam_risk: draft.spamRisk,
+          subject_line_1: draft.subject1,
+          subject_line_2: draft.subject2,
+          user_role: localStorage.getItem("userRole"),
+          user_id: localStorage.getItem("userId"),
+          organization_id: localStorage.getItem("orgId"),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not approve draft.");
+      setDrafts((prev) => {
+        const next = prev.map((d) => d.id === id ? { ...d, status: "Approved" as ApprovalStatus, qaIssues: [] } : d);
+        persistAllDrafts(next);
+        return next;
+      });
+      notice.success(data.message || "Draft approved successfully", "Draft approved");
+    } catch (error: any) {
+      notice.error(error.message || "Could not approve draft.", "Approval failed");
+    }
   };
 
-  const regenerate = (id: number) => {
-    setDrafts((prev) => prev.map((d) => (
-      d.id === id
-        ? {
-            ...d,
-            qaScore: 93,
-            spamRisk: d.spamRisk === "High" ? "Medium" : d.spamRisk,
-            status: "Pending Review",
-            body: d.body.replace("Upgrade now and unlock", "Your team can unlock"),
-        }
-        : d
-    )));
-    notice.info("Draft regenerated and QA score updated.", "Draft revised");
+  const regenerate = async (id: number) => {
+    const draft = drafts.find((item) => item.id === id);
+    if (!draft) return;
+    setRegeneratingId(id);
+    try {
+      const response = await fetch("/api/brain/regenerate-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          draft_id: String(draft.id),
+          record_id: String(draft.id),
+          current_draft: draft,
+          qa_issues: buildQaIssues(draft),
+          model_mode: "Balanced",
+          organization_id: localStorage.getItem("orgId"),
+          user_id: localStorage.getItem("userId"),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not regenerate email.");
+      setDrafts((prev) => {
+        const next = prev.map((d) => d.id === id ? { ...d, ...data.draft, expanded: true } : d);
+        persistAllDrafts(next);
+        return next;
+      });
+      notice.success(data.message || "Email regenerated successfully.", "Draft revised");
+    } catch (error: any) {
+      notice.error(error.message || "Could not regenerate email.", "Regeneration failed");
+    } finally {
+      setRegeneratingId(null);
+    }
   };
 
   const copy = (text: string) => {
@@ -154,6 +261,10 @@ export default function DraftsPage() {
       {/* Draft Cards */}
       <div className="space-y-4">
         {drafts.map((draft) => (
+          (() => {
+            const issues = buildQaIssues(draft);
+            const blockReason = approvalBlockReason(draft);
+            return (
           <div
             key={draft.id}
             className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all
@@ -218,6 +329,11 @@ export default function DraftsPage() {
                       </button>
                     ))}
                   </div>
+                  {issues.includes("Duplicate subject lines") && (
+                    <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
+                      <AlertTriangle className="h-4 w-4" /> Duplicate subject lines
+                    </div>
+                  )}
                 </div>
 
                 {/* Preview Text */}
@@ -254,6 +370,25 @@ export default function DraftsPage() {
                   </div>
                 </div>
 
+                {issues.length > 0 && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-xs font-black uppercase tracking-widest text-amber-700">QA issues found</p>
+                    <ul className="mt-2 space-y-1 text-sm font-medium text-amber-800">
+                      {issues.map((issue) => <li key={issue}>{issue}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {draft.revisionsMade && draft.revisionsMade.length > 0 && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                    <p className="text-xs font-black uppercase tracking-widest text-emerald-700">Revisions made</p>
+                    <ul className="mt-2 space-y-1 text-sm font-medium text-emerald-800">
+                      {draft.revisionsMade.map((item) => <li key={item}>{item}</li>)}
+                    </ul>
+                    <p className="mt-2 text-xs font-bold text-emerald-700">Revision count: {draft.revisionCount || 0}</p>
+                  </div>
+                )}
+
                 {/* Action Bar */}
                 <div className="flex items-center justify-between pt-2 border-t border-slate-100">
                   <div className="flex gap-2">
@@ -265,23 +400,25 @@ export default function DraftsPage() {
                     </button>
                     <button
                       onClick={() => regenerate(draft.id)}
+                      disabled={regeneratingId === draft.id}
                       className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
                     >
-                      <RefreshCw className="h-4 w-4" /> Regenerate
+                      <RefreshCw className={`h-4 w-4 ${regeneratingId === draft.id ? "animate-spin" : ""}`} /> {regeneratingId === draft.id ? "Regenerating..." : "Regenerate Email"}
                     </button>
                   </div>
 
                   {draft.status !== "Approved" ? (
                     <button
                       onClick={() => approve(draft.id)}
-                      aria-disabled={draft.qaScore < QA_APPROVAL_THRESHOLD}
+                      aria-disabled={Boolean(blockReason)}
+                      title={blockReason || "Approve Draft"}
                       className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all ${
-                        draft.qaScore < QA_APPROVAL_THRESHOLD
+                        blockReason
                           ? "bg-slate-300 text-slate-600 shadow-none cursor-not-allowed"
                           : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-md hover:shadow-lg"
                       }`}
                     >
-                      <CheckCircle className="h-4 w-4" /> {draft.qaScore >= QA_APPROVAL_THRESHOLD ? "Approve Draft" : "Needs 90+ QA"}
+                      <CheckCircle className="h-4 w-4" /> {blockReason || "Approve Draft"}
                     </button>
                   ) : (
                     <span className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white">
@@ -292,6 +429,8 @@ export default function DraftsPage() {
               </div>
             )}
           </div>
+            );
+          })()
         ))}
       </div>
     </div>

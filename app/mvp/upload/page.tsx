@@ -100,12 +100,15 @@ export default function UploadPage() {
           _product: product,
           _email: email,
           _dnc: isDnc,
-          _subject: `Unlock More Value at ${company} — Exclusive Offer Inside`,
+          _subject: `Missed growth opportunities at ${company}?`,
+          _subject2: `A simpler next step for ${company}`,
           _preview: `Hi ${name || "there"}, we've identified a tailored growth opportunity for you...`,
           _body: `Hi ${name || "there"},\n\nI hope things are going well at ${company}. I wanted to reach out personally because based on your usage of ${product}, our team identified a tailored upgrade path that could significantly accelerate your results.\n\nI'd love to schedule a quick 15-minute conversation to walk you through what this looks like specifically for ${company}.\n\nAre you available early next week?\n\nBest,\nAccount Growth Team`,
           _score: score,
           _spam: isDnc ? "Blocked" : "Low",
           _status: score >= QA_APPROVAL_THRESHOLD ? "Pending Review" : "Needs Revision",
+          _revision_count: 0,
+          _qa_issues: score >= QA_APPROVAL_THRESHOLD ? [] : ["QA score below threshold"],
           _source: "Upload Data",
         };
       });
