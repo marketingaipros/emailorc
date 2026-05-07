@@ -3,9 +3,11 @@
 import React, { useEffect, useState } from "react";
 import { Brain, Lock, Mail, Loader2, ChevronRight, ShieldCheck, UserCircle2, Pencil, Eye, ClipboardCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useNotice } from "@/components/notice/NoticeProvider";
 
 export default function LoginPage() {
   const router = useRouter();
+  const notice = useNotice();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -56,9 +58,11 @@ export default function LoginPage() {
       localStorage.setItem("userId", data.id);
       localStorage.setItem("sessionCreatedAt", new Date().toISOString());
 
+      notice.success(`Welcome back, ${data.name || data.email}.`, "Login successful");
       router.push("/mvp");
     } catch (err: any) {
       setError(err.message);
+      notice.error(err.message || "Login failed. Check your email and password.", "Login failed");
       setIsLoading(false);
     }
   };

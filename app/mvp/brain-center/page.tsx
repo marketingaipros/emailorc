@@ -30,9 +30,13 @@ import {
   Globe,
   ArrowRight,
   Info,
-  Download
+  Download,
+  Send,
+  MessageSquare,
+  Trash2
 } from "lucide-react";
 import Link from "next/link";
+import { useNotice } from "@/components/notice/NoticeProvider";
 
 type Tab = 
   | "Business Knowledge" 
@@ -44,6 +48,7 @@ type Tab =
   | "Learning Log" 
   | "Learn Mode"
   | "API Connection"
+  | "Model Test Chat"
   | "Usage & Billing";
 
 const TABS: { name: Tab; icon: React.ReactNode }[] = [
@@ -56,6 +61,7 @@ const TABS: { name: Tab; icon: React.ReactNode }[] = [
   { name: "Learning Log", icon: <History className="h-4 w-4" /> },
   { name: "Learn Mode", icon: <GraduationCap className="h-4 w-4" /> },
   { name: "API Connection", icon: <Link2 className="h-4 w-4" /> },
+  { name: "Model Test Chat", icon: <MessageSquare className="h-4 w-4" /> },
   { name: "Usage & Billing", icon: <CreditCard className="h-4 w-4" /> },
 ];
 
@@ -73,15 +79,15 @@ interface ModelConfig {
 }
 
 const DEFAULT_MODELS: ModelConfig[] = [
-  { id: "orc", taskName: "ORC Intake and Validation Model", selectedModel: "gpt-5-nano", purpose: "Parses uploaded records, determines campaign mode, checks DNC status.", temperature: 0.1, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "gpt-5-mini", notes: "Requires strict JSON formatting. Fast model preferred." },
-  { id: "sentinel", taskName: "SENTINEL Strategy Model", selectedModel: "gpt-5-mini", purpose: "Creates the strategic angle, upsell bridge, risk framing, and value outcome.", temperature: 0.7, maxLength: 800, costMode: "Quality", active: true, fallbackModel: "gpt-5.1", notes: "Needs high reasoning capability to avoid generic sales pitches." },
-  { id: "scribe", taskName: "SCRIBE Writing Model", selectedModel: "gpt-5-mini", purpose: "Writes the actual email copy following PAS frameworks and rules.", temperature: 0.6, maxLength: 400, costMode: "Quality", active: true, fallbackModel: "gpt-5.1", notes: "Must strictly adhere to word counts and banned phrase lists." },
-  { id: "lexi", taskName: "LEXI QA Model", selectedModel: "gpt-5.1", purpose: "Scores the draft, checks spam risk, and forces revisions if score < 90.", temperature: 0.2, maxLength: 1000, costMode: "Quality", active: true, fallbackModel: "gpt-5.4-mini", notes: "Needs high instruction-following to enforce the 90/100 threshold." },
-  { id: "reply_class", taskName: "Reply Classification Model", selectedModel: "gpt-5-nano", purpose: "Detects intent and sentiment from inbound customer replies.", temperature: 0.1, maxLength: 200, costMode: "Economy", active: true, fallbackModel: "gpt-5-mini", notes: "" },
-  { id: "reply_draft", taskName: "Reply Drafting Model", selectedModel: "gpt-5-mini", purpose: "Drafts the recommended response for the Reply Assistant.", temperature: 0.5, maxLength: 400, costMode: "Balanced", active: true, fallbackModel: "gpt-5.1", notes: "" },
+  { id: "orc", taskName: "ORC Intake and Validation Model", selectedModel: "openai/gpt-4o-mini", purpose: "Parses uploaded records, determines campaign mode, checks DNC status.", temperature: 0.1, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "google/gemini-flash-1.5", notes: "Requires strict JSON formatting. Fast model preferred." },
+  { id: "sentinel", taskName: "SENTINEL Strategy Model", selectedModel: "openai/gpt-4o-mini", purpose: "Creates the strategic angle, upsell bridge, risk framing, and value outcome.", temperature: 0.7, maxLength: 800, costMode: "Quality", active: true, fallbackModel: "anthropic/claude-3.5-haiku", notes: "Needs high reasoning capability to avoid generic sales pitches." },
+  { id: "scribe", taskName: "SCRIBE Writing Model", selectedModel: "openai/gpt-4o-mini", purpose: "Writes the actual email copy following PAS frameworks and rules.", temperature: 0.6, maxLength: 400, costMode: "Quality", active: true, fallbackModel: "openai/gpt-4o", notes: "Must strictly adhere to word counts and banned phrase lists." },
+  { id: "lexi", taskName: "LEXI QA Model", selectedModel: "openai/gpt-4o", purpose: "Scores the draft, checks spam risk, and forces revisions if score < 90.", temperature: 0.2, maxLength: 1000, costMode: "Quality", active: true, fallbackModel: "anthropic/claude-3.5-sonnet", notes: "Needs high instruction-following to enforce the 90/100 threshold." },
+  { id: "reply_class", taskName: "Reply Classification Model", selectedModel: "openai/gpt-4o-mini", purpose: "Detects intent and sentiment from inbound customer replies.", temperature: 0.1, maxLength: 200, costMode: "Economy", active: true, fallbackModel: "google/gemini-flash-1.5", notes: "" },
+  { id: "reply_draft", taskName: "Reply Drafting Model", selectedModel: "openai/gpt-4o-mini", purpose: "Drafts the recommended response for the Reply Assistant.", temperature: 0.5, maxLength: 400, costMode: "Balanced", active: true, fallbackModel: "openai/gpt-4o", notes: "" },
   { id: "knowledge", taskName: "Knowledge Search / Embedding Model", selectedModel: "text-embedding-3-small", purpose: "Retrieves relevant business knowledge for the strategy context.", temperature: 0, maxLength: 0, costMode: "Economy", active: true, fallbackModel: "", notes: "" },
-  { id: "cleanup", taskName: "Data Cleanup Model", selectedModel: "gpt-5-nano", purpose: "Standardizes messy input data before ORC validation.", temperature: 0.1, maxLength: 2000, costMode: "Economy", active: true, fallbackModel: "gpt-5-mini", notes: "" },
-  { id: "summarization", taskName: "Summarization Model", selectedModel: "gpt-5-mini", purpose: "Summarizes account notes and previous interactions for context.", temperature: 0.3, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "gpt-5-nano", notes: "" },
+  { id: "cleanup", taskName: "Data Cleanup Model", selectedModel: "openai/gpt-4o-mini", purpose: "Standardizes messy input data before ORC validation.", temperature: 0.1, maxLength: 2000, costMode: "Economy", active: true, fallbackModel: "google/gemini-flash-1.5", notes: "" },
+  { id: "summarization", taskName: "Summarization Model", selectedModel: "openai/gpt-4o-mini", purpose: "Summarizes account notes and previous interactions for context.", temperature: 0.3, maxLength: 500, costMode: "Economy", active: true, fallbackModel: "google/gemini-flash-1.5", notes: "" },
 ];
 
 type ModelMode = "Economy" | "Balanced" | "Quality" | "Enterprise";
@@ -89,12 +95,14 @@ type ModelMode = "Economy" | "Balanced" | "Quality" | "Enterprise";
 type UsageSubTab = "Current Plan" | "Credit Rules" | "Plan Builder" | "Trial Settings" | "Usage Logs";
 
 export default function BrainCenterPage() {
+  const notice = useNotice();
   const [activeTab, setActiveTab] = useState<Tab>("Usage & Billing");
   const [models, setModels] = useState<ModelConfig[]>(DEFAULT_MODELS);
   const [isSaving, setIsSaving] = useState(false);
   
   // API Connection State
-  const [apiKey, setApiKey] = useState("sk_demo_9a8b7c6d5e4f3g2h1i0j");
+  const [apiKey, setApiKey] = useState("");
+  const [maskedApiKey, setMaskedApiKey] = useState("Server secret or saved key");
   const [showKey, setShowKey] = useState(false);
   const [envConfig, setEnvConfig] = useState<any>({
     mode: "DEMO",
@@ -120,28 +128,71 @@ export default function BrainCenterPage() {
   const [lastTested, setLastTested] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [apiKeySaved, setApiKeySaved] = useState(true);
+  const [availableModelsLoaded, setAvailableModelsLoaded] = useState(false);
+  const [modelTested, setModelTested] = useState<string | null>(null);
+  const [connectionMessage, setConnectionMessage] = useState("No live test has been run in this session.");
+
+  const [chatModel, setChatModel] = useState("openai/gpt-4o-mini");
+  const [chatTask, setChatTask] = useState("General Test");
+  const [chatPrompt, setChatPrompt] = useState("Write a short professional email opening for an accountant who misses calls during tax season.");
+  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "assistant"; content: string; meta?: string }>>([]);
+  const [isChatTesting, setIsChatTesting] = useState(false);
+  const [lastChatResult, setLastChatResult] = useState<any>(null);
+  const [usageLogs, setUsageLogs] = useState<any[]>([]);
 
   const [isSyncing, setIsSyncing] = useState(false);
 
-  function handleSaveApiKey() {
+  const environmentName = envConfig.mode === "DEMO" ? "Demo" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production";
+  const orgId = typeof window !== "undefined" ? localStorage.getItem("orgId") : null;
+  const userId = typeof window !== "undefined" ? localStorage.getItem("userId") : null;
+
+  async function refreshUsageLogs() {
+    try {
+      const response = await fetch(`/api/usage/logs?org_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`);
+      const data = await response.json();
+      setUsageLogs(data.logs || []);
+    } catch {
+      setUsageLogs([]);
+    }
+  }
+
+  useEffect(() => {
+    refreshUsageLogs();
+  }, []);
+
+  async function handleSaveApiKey() {
     const trimmed = apiKey.trim();
-    const validDemoKey = trimmed === "sk_demo_9a8b7c6d5e4f3g2h1i0j";
     const validOpenRouterShape = trimmed.startsWith("sk-or-v1-") && trimmed.length >= 48;
 
-    if (!validDemoKey && !validOpenRouterShape) {
+    if (!validOpenRouterShape) {
       setApiKeySaved(false);
       setConnectionStatus("Invalid API Key");
       setLastTested(new Date().toLocaleString());
+      notice.error("Enter a valid OpenRouter key before saving.", "API key not saved");
       return;
     }
 
     setIsSaving(true);
-    setTimeout(() => {
-      setApiKey(trimmed);
-      setIsSaving(false);
+    try {
+      const response = await fetch("/api/brain/api-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: modelProvider, api_key: trimmed, org_id: orgId }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.safe_error || data.error || "Could not save API key.");
+      setMaskedApiKey(data.masked_key || "Saved securely");
+      setApiKey("");
+      setShowKey(false);
       setApiKeySaved(true);
       setConnectionStatus("Not Connected");
-    }, 800);
+      notice.success(data.message || "OpenRouter API key saved securely.", "API key saved");
+    } catch (error: any) {
+      setApiKeySaved(false);
+      notice.error(error.message || "Could not save OpenRouter API key.", "API key save failed");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function handleTestConnection() {
@@ -153,22 +204,32 @@ export default function BrainCenterPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: modelProvider,
-          environment: envConfig.mode === "DEMO" ? "Demo" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production",
+          environment: environmentName,
           selected_model_mode: modelMode,
-          api_key: apiKey,
+          selected_model: chatModel,
+          org_id: orgId,
+          user_id: userId,
         })
       });
       const data = await response.json();
       if (data.status === "connected") {
         setConnectionStatus("Connected");
-      } else if (data.status === "invalid_api_key") {
-        setConnectionStatus("Invalid API Key");
+        setAvailableModelsLoaded(Boolean(data.available_models_loaded));
+        setModelTested(data.model_tested || null);
+        setConnectionMessage(data.message || "OpenRouter connection successful.");
+        notice.success(`${data.message} Model tested: ${data.model_tested}.`, "OpenRouter connected");
       } else {
         setConnectionStatus("Error");
+        setConnectionMessage(data.safe_error || data.message || "OpenRouter connection failed.");
+        notice.error(data.safe_error || data.message || "OpenRouter connection failed.", "OpenRouter failed");
       }
-      setLastTested(new Date().toLocaleString());
+      setLastTested(data.last_tested ? new Date(data.last_tested).toLocaleString() : new Date().toLocaleString());
+      refreshUsageLogs();
     } catch (err) {
       setConnectionStatus("Provider Unavailable");
+      const message = err instanceof Error ? err.message : "OpenRouter provider unavailable.";
+      setConnectionMessage(message);
+      notice.error(message, "OpenRouter failed");
     } finally {
       setIsTesting(false);
     }
@@ -179,17 +240,15 @@ export default function BrainCenterPage() {
     if (mode === "Balanced") {
       setModels(prev => prev.map(m => {
         let selectedModel = m.selectedModel;
-        if (m.id === "orc") selectedModel = "gpt-5-nano";
-        if (m.id === "sentinel") selectedModel = "gpt-5-mini";
-        if (m.id === "scribe") selectedModel = "gpt-5-mini";
-        if (m.id === "lexi") selectedModel = "gpt-5.1";
-        if (m.id === "reply_class") selectedModel = "gpt-5-nano";
-        if (m.id === "reply_draft") selectedModel = "gpt-5-mini";
-        if (m.id === "cleanup") selectedModel = "gpt-5-nano";
-        if (m.id === "summarization") selectedModel = "gpt-5-mini";
+        if (m.id === "lexi") selectedModel = "openai/gpt-4o";
+        else selectedModel = "openai/gpt-4o-mini";
         return { ...m, selectedModel };
       }));
     }
+    if (mode === "Economy") setChatModel("openai/gpt-4o-mini");
+    if (mode === "Quality") setChatModel("openai/gpt-4o");
+    if (mode === "Enterprise") setChatModel("anthropic/claude-3.5-sonnet");
+    notice.info(`Model mode set to ${mode}.`, "Model mode updated");
     // Logic for other modes would go here
   }
 
@@ -207,7 +266,53 @@ export default function BrainCenterPage() {
 
   function handleSave() {
     setIsSaving(true);
-    setTimeout(() => setIsSaving(false), 800);
+    setTimeout(() => {
+      setIsSaving(false);
+      notice.success("Brain Center settings saved.", "Settings saved");
+    }, 800);
+  }
+
+  async function handleSendTestChat() {
+    const prompt = chatPrompt.trim();
+    if (!prompt) {
+      notice.warning("Enter a prompt before running the model test.", "Prompt required");
+      return;
+    }
+    setIsChatTesting(true);
+    setChatMessages((current) => [...current, { role: "user", content: prompt }]);
+    try {
+      const response = await fetch("/api/brain/test-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: modelProvider,
+          environment: environmentName,
+          model_mode: modelMode,
+          model: chatModel,
+          task: chatTask,
+          prompt,
+          org_id: orgId,
+          user_id: userId,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.safe_error || data.message || "Model test chat failed.");
+      setLastChatResult(data);
+      setChatMessages((current) => [...current, {
+        role: "assistant",
+        content: data.response || "No model response returned.",
+        meta: `${data.provider} / ${data.model_used} / ${data.response_time_ms}ms / ${data.credits_charged} credit`,
+      }]);
+      notice.success("Model Test Chat completed and usage was logged.", "Brain test passed");
+      refreshUsageLogs();
+    } catch (error: any) {
+      const message = error.message || "Model Test Chat failed.";
+      setChatMessages((current) => [...current, { role: "assistant", content: message, meta: "Error" }]);
+      notice.error(message, "Brain test failed");
+      refreshUsageLogs();
+    } finally {
+      setIsChatTesting(false);
+    }
   }
 
   return (
@@ -255,7 +360,8 @@ export default function BrainCenterPage() {
                 {activeTab === "Model Settings" && "Map specific GPT-5 series LLMs to discrete tasks to balance quality and economy."}
                 {activeTab === "Usage & Billing" && "Manage your AI Credits, subscription tier, and usage metrics."}
                 {activeTab === "API Connection" && "Configure your Brain API environment, keys, and hybrid demo fallback settings."}
-                {!["Model Settings", "Usage & Billing", "API Connection"].includes(activeTab) && "Configure intelligence parameters for the AI generation workflow."}
+                {activeTab === "Model Test Chat" && "Run admin-only model checks before testers use the Brain API."}
+                {!["Model Settings", "Usage & Billing", "API Connection", "Model Test Chat"].includes(activeTab) && "Configure intelligence parameters for the AI generation workflow."}
               </p>
             </div>
             <button
@@ -366,10 +472,11 @@ export default function BrainCenterPage() {
                                 (model.selectedModel === "gpt-5-mini" && connectionStatus === "Error") ? "border-red-300 text-red-700" : ""
                               }`}
                             >
-                              <option value="gpt-5-nano">GPT-5 Nano</option>
-                              <option value="gpt-5-mini">GPT-5 Mini</option>
-                              <option value="gpt-5.1">GPT-5.1</option>
-                              <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                              <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
+                              <option value="openai/gpt-4o">OpenAI GPT-4o</option>
+                              <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
+                              <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                              <option value="google/gemini-flash-1.5">Gemini Flash 1.5</option>
                               <option value="text-embedding-3-small">Embeddings 3 Small</option>
                             </select>
                             {model.selectedModel === "gpt-5.1" && connectionStatus === "Connected" && (
@@ -391,10 +498,11 @@ export default function BrainCenterPage() {
                               className="w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
                             >
                               <option value="">None</option>
-                              <option value="gpt-5-nano">GPT-5 Nano</option>
-                              <option value="gpt-5-mini">GPT-5 Mini</option>
-                              <option value="gpt-5.1">GPT-5.1</option>
-                              <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                              <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
+                              <option value="openai/gpt-4o">OpenAI GPT-4o</option>
+                              <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
+                              <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                              <option value="google/gemini-flash-1.5">Gemini Flash 1.5</option>
                             </select>
                           </div>
                         </div>
@@ -665,12 +773,31 @@ export default function BrainCenterPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 font-medium">
-                               {[
-                                 { time: "2026-05-06 10:12:04", org: "Acme", user: "j.smith", action: "SENTINEL Strategy", cost: "-2", model: "GPT-5.1", tokens: "1,240 / 480", api: "$0.014", status: "Success" },
-                                 { time: "2026-05-06 10:10:55", org: "Acme", user: "j.smith", action: "SCRIBE Writing", cost: "-5", model: "GPT-5-mini", tokens: "850 / 620", api: "$0.006", status: "Success" },
-                                 { time: "2026-05-06 09:45:12", org: "Globex", user: "h.simpson", action: "LEXI QA", cost: "-2", model: "GPT-5.1", tokens: "2,100 / 150", api: "$0.021", status: "Success" },
-                                 { time: "2026-05-06 09:30:01", org: "Acme", user: "j.smith", action: "ORC Validation", cost: "-1", model: "GPT-5-nano", tokens: "4,200 / 200", api: "$0.001", status: "Success" },
-                               ].map((log, i) => (
+                               {(usageLogs.some((log) => String(log.action || "").includes("ORC")) ? usageLogs : [
+                                 ...usageLogs,
+                                 {
+                                   created_at: "2026-05-06 09:30:01",
+                                   org_name: "Acme",
+                                   user_email: "j.smith",
+                                   action: "ORC Validation",
+                                   model_used: "openai/gpt-4o-mini",
+                                   credits_charged: 1,
+                                   prompt_tokens: 4200,
+                                   completion_tokens: 200,
+                                   estimated_api_cost: 0.001,
+                                   success: 1,
+                                 },
+                               ]).map((log) => ({
+                                 time: String(log.created_at || "").replace("T", " ").slice(0, 19),
+                                 org: log.org_name || "Demo Organization",
+                                 user: log.user_email || "admin",
+                                 action: log.action,
+                                 cost: `-${log.credits_charged || 0}`,
+                                 model: log.model_used,
+                                 tokens: `${log.prompt_tokens || 0} / ${log.completion_tokens || 0}`,
+                                 api: log.estimated_api_cost ? `$${Number(log.estimated_api_cost).toFixed(4)}` : "n/a",
+                                 status: Number(log.success) === 1 ? "Success" : "Failed",
+                               })).map((log, i) => (
                                  <tr key={i} className="hover:bg-slate-50/50 transition-colors">
                                     <td className="px-4 py-3 text-slate-400 font-mono">{log.time.split(' ')[1]}</td>
                                     <td className="px-4 py-3 text-slate-600 font-bold">{log.org}</td>
@@ -695,6 +822,137 @@ export default function BrainCenterPage() {
                         <button className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-colors">View All Audit Logs →</button>
                       </div>
                    </div>
+                )}
+              </div>
+            ) : activeTab === "Model Test Chat" ? (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
+                  <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Model</label>
+                      <select
+                        value={chatModel}
+                        onChange={(e) => setChatModel(e.target.value)}
+                        className="w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700"
+                      >
+                        <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
+                        <option value="openai/gpt-4o">OpenAI GPT-4o</option>
+                        <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
+                        <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                        <option value="google/gemini-flash-1.5">Gemini Flash 1.5</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Model Mode</label>
+                      <select
+                        value={modelMode}
+                        onChange={(e) => applyModelMode(e.target.value as ModelMode)}
+                        className="w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700"
+                      >
+                        <option value="Economy">Economy</option>
+                        <option value="Balanced">Balanced</option>
+                        <option value="Quality">Quality</option>
+                        <option value="Enterprise">Enterprise</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Task</label>
+                      <select
+                        value={chatTask}
+                        onChange={(e) => setChatTask(e.target.value)}
+                        className="w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700"
+                      >
+                        {[
+                          "General Test",
+                          "ORC Intake Test",
+                          "SENTINEL Strategy Test",
+                          "SCRIBE Writing Test",
+                          "LEXI QA Test",
+                          "Reply Classification Test",
+                          "Reply Drafting Test",
+                        ].map((task) => <option key={task} value={task}>{task}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 space-y-2">
+                      <div className="flex justify-between"><span>Provider</span><strong>OpenRouter</strong></div>
+                      <div className="flex justify-between"><span>Subscription</span><strong className="text-emerald-600">Active</strong></div>
+                      <div className="flex justify-between"><span>Credit cost</span><strong>1 test credit</strong></div>
+                      <div className="flex justify-between"><span>Environment</span><strong>{environmentName}</strong></div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                    <div className="border-b border-slate-100 bg-slate-50 px-4 py-3 flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">Admin Model Test Chat</h3>
+                        <p className="text-xs text-slate-500">Successful tests write to Usage Logs and charge 1 test credit.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setChatMessages([]); setLastChatResult(null); }}
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Clear Chat
+                      </button>
+                    </div>
+
+                    <div className="h-[320px] overflow-y-auto p-4 space-y-3 bg-slate-50/40">
+                      {chatMessages.length === 0 ? (
+                        <div className="flex h-full items-center justify-center text-center">
+                          <div>
+                            <MessageSquare className="mx-auto h-8 w-8 text-slate-300" />
+                            <p className="mt-2 text-sm font-semibold text-slate-500">Run a model test before inviting users.</p>
+                          </div>
+                        </div>
+                      ) : chatMessages.map((message, index) => (
+                        <div key={index} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                          <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                            message.role === "user" ? "bg-indigo-600 text-white" : "bg-white border border-slate-200 text-slate-700"
+                          }`}>
+                            <p className="whitespace-pre-wrap">{message.content}</p>
+                            {message.meta && <p className="mt-2 text-[10px] font-bold uppercase tracking-widest opacity-60">{message.meta}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="border-t border-slate-100 p-4 space-y-3">
+                      <textarea
+                        value={chatPrompt}
+                        onChange={(e) => setChatPrompt(e.target.value)}
+                        rows={3}
+                        className="w-full resize-none rounded-xl border-slate-200 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSendTestChat}
+                        disabled={isChatTesting}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        {isChatTesting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        {isChatTesting ? "Testing Model..." : "Send Test"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {lastChatResult && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[
+                      ["Model Used", lastChatResult.model_used],
+                      ["Response Time", `${lastChatResult.response_time_ms}ms`],
+                      ["Credits Charged", lastChatResult.credits_charged],
+                      ["Tokens", `${lastChatResult.prompt_tokens || 0} / ${lastChatResult.completion_tokens || 0}`],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl border border-slate-200 bg-white p-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                        <p className="mt-1 text-sm font-bold text-slate-900">{value}</p>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             ) : activeTab === "API Connection" ? (
@@ -745,7 +1003,7 @@ export default function BrainCenterPage() {
                       <div className="relative">
                         <input 
                           type={showKey ? "text" : "password"} 
-                          value={apiKeySaved && !showKey ? "••••••••••••••••" : apiKey} 
+                          value={apiKeySaved && !showKey ? maskedApiKey : apiKey} 
                           onChange={(e) => {
                             setApiKey(e.target.value);
                             setApiKeySaved(false);
@@ -785,7 +1043,15 @@ export default function BrainCenterPage() {
                           </div>
                           <div className="flex justify-between text-xs">
                             <span className="text-slate-500">Available Models:</span>
-                            <span className="font-bold text-emerald-600">Yes (Loaded)</span>
+                            <span className={`font-bold ${availableModelsLoaded ? "text-emerald-600" : "text-slate-500"}`}>{availableModelsLoaded ? "Yes (Loaded)" : "No"}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Model Tested:</span>
+                            <span className="font-bold text-slate-700">{modelTested || "None"}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Message:</span>
+                            <span className="max-w-[220px] text-right font-bold text-slate-700">{connectionMessage}</span>
                           </div>
                         </div>
                       </div>

@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import Papa from "papaparse";
 import { UploadCloud, FileText, ShieldCheck, Zap, CheckCircle, Loader2, Copy, RefreshCw } from "lucide-react";
+import { useNotice } from "@/components/notice/NoticeProvider";
 
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
 const QA_APPROVAL_THRESHOLD = 90;
@@ -28,6 +29,7 @@ function persistDrafts(drafts: any[]) {
 }
 
 export default function UploadPage() {
+  const notice = useNotice();
   const [data, setData] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<any[]>([]);
@@ -59,8 +61,12 @@ export default function UploadPage() {
           const rows = parsed.data as any[];
           setData(rows);
           setFieldMapping(inferMapping(Object.keys(rows[0] || {})));
+          notice.success(`${rows.length} records loaded and ready for mapping.`, "Upload completed");
+        } else {
+          notice.warning("The uploaded file did not contain any records.", "Upload empty");
         }
       },
+      error: (error) => notice.error(error.message || "Upload failed. Check the file format.", "Upload failed"),
     });
   };
 
@@ -106,12 +112,21 @@ export default function UploadPage() {
       setResults(generated);
       persistDrafts(generated);
       setIsProcessing(false);
+      notice.success(`${generated.length} drafts generated and validation completed.`, "Record validation completed");
     }, 2500);
   };
 
-  const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    notice.info("Draft copied to clipboard.", "Copied");
+  };
 
   const handleApprove = (idx: number) => {
+    const row = results[idx];
+    if (row?._score < QA_APPROVAL_THRESHOLD) {
+      notice.warning("Draft approval blocked. QA score must be 90 or higher.", "Approval blocked");
+      return;
+    }
     setResults((prev) => {
       const next = prev.map((r, i) => (
         i === idx && r._score >= QA_APPROVAL_THRESHOLD ? { ...r, _status: "Approved" } : r
@@ -119,6 +134,7 @@ export default function UploadPage() {
       persistDrafts(next);
       return next;
     });
+    notice.success("Draft approved.", "Approval complete");
   };
 
   const handleRegenerate = (idx: number) => {
@@ -136,6 +152,7 @@ export default function UploadPage() {
       persistDrafts(next);
       return next;
     });
+    notice.info("Draft regenerated with a higher QA score.", "Draft revised");
   };
 
   const approvedCount = results.filter((r) => r._status === "Approved").length;
@@ -333,8 +350,10 @@ export default function UploadPage() {
                 {row._status !== "Approved" ? (
                   <button
                     onClick={() => handleApprove(idx)}
-                    disabled={row._score < QA_APPROVAL_THRESHOLD}
-                    className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors shadow-sm"
+                    aria-disabled={row._score < QA_APPROVAL_THRESHOLD}
+                    className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white transition-colors shadow-sm ${
+                      row._score < QA_APPROVAL_THRESHOLD ? "bg-slate-300 text-slate-600 cursor-not-allowed" : "bg-indigo-600 hover:bg-indigo-700"
+                    }`}
                   >
                     <CheckCircle className="h-4 w-4" /> {row._score >= QA_APPROVAL_THRESHOLD ? "Approve Draft" : "Needs 90+ QA"}
                   </button>

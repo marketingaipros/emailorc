@@ -15,9 +15,11 @@ import {
   RefreshCw
 } from "lucide-react";
 import { useRouter, usePathname } from "next/navigation";
+import { useNotice } from "@/components/notice/NoticeProvider";
 
 export function Header() {
   const router = useRouter();
+  const notice = useNotice();
   const pathname = usePathname();
   const [role, setRole] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
@@ -61,6 +63,7 @@ export function Header() {
 
   const handleLogout = () => {
     localStorage.clear();
+    notice.info("You have been logged out.", "Logout successful");
     router.push("/login");
   };
 

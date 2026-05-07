@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { Download, FileSpreadsheet, FileText, Mail, Users, XCircle, MessageSquare, CheckCircle } from "lucide-react";
+import { useNotice } from "@/components/notice/NoticeProvider";
 
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
 
@@ -16,6 +17,7 @@ const EXPORT_OPTIONS = [
 ];
 
 export default function ExportCenterPage() {
+  const notice = useNotice();
   const [exported, setExported] = useState<Set<string>>(new Set());
 
   const exportFile = (id: string, format: string) => {
@@ -47,6 +49,7 @@ export default function ExportCenterPage() {
     link.click();
     URL.revokeObjectURL(url);
     setExported((p) => new Set([...p, id]));
+    notice.success(`${format} export completed.`, "Export completed");
   };
 
   return (

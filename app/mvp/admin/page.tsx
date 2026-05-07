@@ -38,6 +38,7 @@ import {
   Cpu
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useNotice } from "@/components/notice/NoticeProvider";
 
 type AdminTab = "Users" | "Organizations" | "Roles & Permissions" | "Subscription Plans" | "AI Credits" | "Usage Logs" | "API Settings" | "Environment";
 
@@ -57,6 +58,7 @@ interface EnvironmentConfig {
 
 export default function AdminConsole() {
   const router = useRouter();
+  const notice = useNotice();
   const [activeTab, setActiveTab] = useState<AdminTab>("Users");
   const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -109,6 +111,7 @@ export default function AdminConsole() {
       if (savedEnv) setEnvConfig(JSON.parse(savedEnv));
     } catch (err) {
       setError("Could not load administrative data. Please refresh.");
+      notice.error("Could not load administrative data. Please refresh.", "Admin data failed");
     } finally {
       setIsLoading(false);
     }
@@ -118,12 +121,14 @@ export default function AdminConsole() {
     setEnvConfig(config);
     localStorage.setItem("envConfig", JSON.stringify(config));
     setSuccess("Environment configuration updated.");
+    notice.success("Environment configuration updated.", "Environment saved");
     setTimeout(() => setSuccess(null), 3000);
   };
 
   const handleModeSwitch = (newMode: EnvironmentMode) => {
     if (newMode === "PRODUCTION" && !isSuperAdmin) {
       setError("Only Super Admins can transition to Production Mode.");
+      notice.error("Only Super Admins can transition to Production Mode.", "Permission blocked");
       return;
     }
 
@@ -222,6 +227,7 @@ export default function AdminConsole() {
       if (!res.ok) throw new Error(data.error || "Failed to create user");
       
       setSuccess("User provisioned successfully.");
+      notice.success("User provisioned successfully.", "User created");
       setIsCreateUserModalOpen(false);
       setNewUser({ 
         firstName: "", 
@@ -240,6 +246,7 @@ export default function AdminConsole() {
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
       setError(err.message);
+      notice.error(err.message || "Failed to create user.", "User creation failed");
     }
   };
 
@@ -267,12 +274,14 @@ export default function AdminConsole() {
       if (!res.ok) throw new Error(data.error || "Failed to update user");
       
       setSuccess("User updated successfully.");
+      notice.success("User updated successfully.", "User saved");
       setIsEditModalOpen(false);
       fetchData();
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
       setError(err.message);
+      notice.error(err.message || "Failed to update user.", "User update failed");
     }
   };
 
@@ -284,38 +293,24 @@ export default function AdminConsole() {
       if (!res.ok) throw new Error("Failed to archive user");
       
       setSuccess("User archived.");
+      notice.warning("User archived.", "User archived");
       fetchData();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
       setError(err.message);
+      notice.error(err.message || "Failed to archive user.", "Archive failed");
     }
   };
 
   const handleAction = async (id: string, action: string) => {
     // Placeholder for other actions like Resend Invite, Suspend, etc.
     setSuccess(`${action} action performed.`);
+    notice.info(`${action} action performed.`, "Admin action");
     setTimeout(() => setSuccess(null), 2000);
   };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12">
-      {/* Notifications */}
-      <div className="fixed top-6 right-6 z-[100] flex flex-col gap-3">
-        {error && (
-          <div className="bg-red-500 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-right-full">
-            <AlertCircle className="h-5 w-5" />
-            <span className="font-bold text-sm">{error}</span>
-            <button onClick={() => setError(null)}><XCircle className="h-4 w-4 opacity-50" /></button>
-          </div>
-        )}
-        {success && (
-          <div className="bg-emerald-500 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-right-full">
-            <CheckCircle2 className="h-5 w-5" />
-            <span className="font-bold text-sm">{success}</span>
-          </div>
-        )}
-      </div>
-
       {/* Admin Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-950 p-6 rounded-3xl border border-white/5 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-full bg-indigo-600/5 blur-3xl -z-10" />

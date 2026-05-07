@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, Zap, ShieldAlert } from "lucide-react";
+import { useNotice } from "@/components/notice/NoticeProvider";
 
 type ApprovalStatus = "Pending Review" | "Approved" | "Regenerate";
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
@@ -64,6 +65,7 @@ const DEMO_DRAFTS: Draft[] = [
 ];
 
 export default function DraftsPage() {
+  const notice = useNotice();
   const [drafts, setDrafts] = useState<Draft[]>(DEMO_DRAFTS);
   const [activeSubject, setActiveSubject] = useState<Record<number, 1 | 2>>({});
 
@@ -96,12 +98,19 @@ export default function DraftsPage() {
   const toggle = (id: number) =>
     setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, expanded: !d.expanded } : d)));
 
-  const approve = (id: number) =>
+  const approve = (id: number) => {
+    const draft = drafts.find((item) => item.id === id);
+    if (draft && draft.qaScore < QA_APPROVAL_THRESHOLD) {
+      notice.warning("Draft approval blocked. QA score must be 90 or higher.", "Approval blocked");
+      return;
+    }
     setDrafts((prev) => prev.map((d) => (
       d.id === id && d.qaScore >= QA_APPROVAL_THRESHOLD ? { ...d, status: "Approved" } : d
     )));
+    notice.success("Draft approved.", "Approval complete");
+  };
 
-  const regenerate = (id: number) =>
+  const regenerate = (id: number) => {
     setDrafts((prev) => prev.map((d) => (
       d.id === id
         ? {
@@ -110,11 +119,16 @@ export default function DraftsPage() {
             spamRisk: d.spamRisk === "High" ? "Medium" : d.spamRisk,
             status: "Pending Review",
             body: d.body.replace("Upgrade now and unlock", "Your team can unlock"),
-          }
+        }
         : d
     )));
+    notice.info("Draft regenerated and QA score updated.", "Draft revised");
+  };
 
-  const copy = (text: string) => navigator.clipboard.writeText(text);
+  const copy = (text: string) => {
+    navigator.clipboard.writeText(text);
+    notice.info("Draft copied to clipboard.", "Copied");
+  };
 
   const subjectFor = (d: Draft) => activeSubject[d.id] === 2 ? d.subject2 : d.subject1;
 
@@ -260,8 +274,12 @@ export default function DraftsPage() {
                   {draft.status !== "Approved" ? (
                     <button
                       onClick={() => approve(draft.id)}
-                      disabled={draft.qaScore < QA_APPROVAL_THRESHOLD}
-                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 shadow-md hover:shadow-lg transition-all disabled:bg-slate-300 disabled:text-slate-600 disabled:shadow-none disabled:cursor-not-allowed"
+                      aria-disabled={draft.qaScore < QA_APPROVAL_THRESHOLD}
+                      className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all ${
+                        draft.qaScore < QA_APPROVAL_THRESHOLD
+                          ? "bg-slate-300 text-slate-600 shadow-none cursor-not-allowed"
+                          : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-md hover:shadow-lg"
+                      }`}
                     >
                       <CheckCircle className="h-4 w-4" /> {draft.qaScore >= QA_APPROVAL_THRESHOLD ? "Approve Draft" : "Needs 90+ QA"}
                     </button>
