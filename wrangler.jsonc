@@ -1,0 +1,113 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "emailorc-account-growth",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-05-07",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "emailorc-account-growth"
+    }
+  ],
+  "vars": {
+    "APP_ENV": "demo",
+    "BRAIN_API_MODE": "demo",
+    "AUTO_SEND_ENABLED": "false",
+    "HUMAN_APPROVAL_REQUIRED": "true",
+    "CRM_INTEGRATIONS_ENABLED": "false",
+    "EMAIL_INTEGRATIONS_ENABLED": "false"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "emailorc-demo-db",
+      "database_id": "6796b4fe-0134-42e0-89ee-a8488edc7da4",
+      "migrations_dir": "d1/migrations"
+    }
+  ],
+  "env": {
+    "demo": {
+      "name": "emailorc-account-growth-demo",
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "emailorc-account-growth-demo"
+        }
+      ],
+      "vars": {
+        "APP_ENV": "demo",
+        "BRAIN_API_MODE": "demo",
+        "AUTO_SEND_ENABLED": "false",
+        "HUMAN_APPROVAL_REQUIRED": "true",
+        "CRM_INTEGRATIONS_ENABLED": "false",
+        "EMAIL_INTEGRATIONS_ENABLED": "false"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "emailorc-demo-db",
+          "database_id": "6796b4fe-0134-42e0-89ee-a8488edc7da4",
+          "migrations_dir": "d1/migrations"
+        }
+      ]
+    },
+    "test-live": {
+      "name": "emailorc-account-growth-test-live",
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "emailorc-account-growth-test-live"
+        }
+      ],
+      "vars": {
+        "APP_ENV": "test-live",
+        "BRAIN_API_MODE": "test-live",
+        "AUTO_SEND_ENABLED": "false",
+        "HUMAN_APPROVAL_REQUIRED": "true",
+        "CRM_INTEGRATIONS_ENABLED": "false",
+        "EMAIL_INTEGRATIONS_ENABLED": "false"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "emailorc-test-live-db",
+          "database_id": "5fd479d5-5f9a-457c-a285-dbc9a78a461b",
+          "migrations_dir": "d1/migrations"
+        }
+      ]
+    },
+    "production": {
+      "name": "emailorc-account-growth-production",
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "emailorc-account-growth-production"
+        }
+      ],
+      "vars": {
+        "APP_ENV": "production",
+        "BRAIN_API_MODE": "production",
+        "AUTO_SEND_ENABLED": "false",
+        "HUMAN_APPROVAL_REQUIRED": "true",
+        "CRM_INTEGRATIONS_ENABLED": "false",
+        "EMAIL_INTEGRATIONS_ENABLED": "false"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "emailorc-production-db",
+          "database_id": "replace-with-production-d1-database-id",
+          "migrations_dir": "d1/migrations"
+        }
+      ]
+    }
+  }
+}

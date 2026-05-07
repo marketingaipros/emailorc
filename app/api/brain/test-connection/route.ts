@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 
+export const dynamic = "force-dynamic";
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { provider, environment, selected_model_mode, api_key } = body;
-    const key = String(api_key || "").trim();
+    const serverKey = String(process.env.OPENROUTER_API_KEY || "").trim();
+    const submittedKey = String(api_key || "").trim();
     const mode = String(environment || "Demo");
+    const key = mode === "Demo" ? (submittedKey || serverKey) : serverKey;
 
     await new Promise(resolve => setTimeout(resolve, 500));
 
@@ -21,6 +25,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         status: "invalid_api_key",
         provider: "OpenRouter",
+        environment: mode,
+        model_mode: selected_model_mode || "Balanced",
         message: "OpenRouter API key is required."
       }, { status: 400 });
     }
@@ -50,6 +56,7 @@ export async function POST(request: Request) {
         status: "invalid_api_key",
         provider: "OpenRouter",
         environment: mode,
+        model_mode: selected_model_mode || "Balanced",
         message: "Invalid OpenRouter key format."
       }, { status: 400 });
     }
@@ -68,6 +75,7 @@ export async function POST(request: Request) {
         status: "invalid_api_key",
         provider: "OpenRouter",
         environment: mode,
+        model_mode: selected_model_mode || "Balanced",
         message: "OpenRouter rejected this API key."
       }, { status: 401 });
     }

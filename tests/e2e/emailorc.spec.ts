@@ -58,13 +58,15 @@ test.describe("EmailORC manual QA coverage", () => {
     await provisionForm.getByPlaceholder("Doe", { exact: true }).fill("Provisioned");
     await provisionForm.getByPlaceholder("john.doe@company.com").fill(email);
     await provisionForm.getByPlaceholder("Revenue Manager").fill("QA Operator");
+    await provisionForm.locator("select").first().selectOption({ label: "Demo Organization" });
     await provisionForm.locator("select").nth(1).selectOption("REVIEWER");
     await provisionForm.getByPlaceholder("••••••••").fill("QaUser123!");
+    await provisionForm.getByRole("button", { name: /provision user account/i }).scrollIntoViewIfNeeded();
     const createResponse = page.waitForResponse((response) =>
       response.url().includes("/api/admin/users") &&
       response.request().method() === "POST"
     );
-    await provisionForm.getByRole("button", { name: /provision user account/i }).click({ force: true });
+    await provisionForm.getByRole("button", { name: /provision user account/i }).click();
     expect((await createResponse).ok()).toBeTruthy();
     await expect(page.getByText("User provisioned successfully.")).toBeVisible({ timeout: 10000 });
     await expect(page.getByText(email)).toBeVisible();

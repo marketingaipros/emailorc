@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createId, getD1Database } from "@/lib/cloudflare-db";
 import * as bcrypt from "bcryptjs";
+
+export const dynamic = "force-dynamic";
 
 export async function PATCH(
   request: Request,
@@ -20,6 +23,59 @@ export async function PATCH(
       requirePasswordReset,
       notes 
     } = body;
+
+    const db = await getD1Database();
+    if (db) {
+      const existingUser = await db.prepare("SELECT id FROM users WHERE id = ?").bind(id).first();
+      if (!existingUser) {
+        return NextResponse.json({ error: "User not found" }, { status: 404 });
+      }
+
+      const passwordHash = password ? await bcrypt.hash(password, 10) : null;
+      if (passwordHash) {
+        await db.prepare(`
+          UPDATE users
+          SET first_name = ?, last_name = ?, job_title = ?, status = ?, password_hash = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(firstName || null, lastName || null, jobTitle || null, status || "ACTIVE", passwordHash, id).run();
+      } else {
+        await db.prepare(`
+          UPDATE users
+          SET first_name = ?, last_name = ?, job_title = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(firstName || null, lastName || null, jobTitle || null, status || "ACTIVE", id).run();
+      }
+
+      const existingMembership = await db.prepare("SELECT id, organization_id, role FROM memberships WHERE user_id = ? LIMIT 1")
+        .bind(id)
+        .first();
+
+      if (existingMembership) {
+        await db.prepare(`
+          UPDATE memberships
+          SET organization_id = ?, role = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(organizationId || existingMembership.organization_id, role || existingMembership.role, existingMembership.id).run();
+      } else if (organizationId && role) {
+        await db.prepare(`
+          INSERT INTO memberships (id, user_id, organization_id, role, status)
+          VALUES (?, ?, ?, ?, 'ACTIVE')
+        `).bind(createId("membership"), id, organizationId, role).run();
+      }
+
+      await db.prepare(`
+        INSERT INTO audit_log (id, action, target_type, target_id, metadata)
+        VALUES (?, 'EDIT_USER', 'USER', ?, ?)
+      `).bind(createId("audit"), id, JSON.stringify({ role, organizationId, status, notes })).run();
+
+      return NextResponse.json({
+        id,
+        firstName,
+        lastName,
+        jobTitle,
+        status,
+      });
+    }
 
     const user = await prisma.$transaction(async (tx) => {
       // Update User fields
@@ -91,6 +147,19 @@ export async function DELETE(
 ) {
   try {
     const id = params.id;
+
+    const db = await getD1Database();
+    if (db) {
+      await db.batch([
+        db.prepare("UPDATE users SET status = 'ARCHIVED', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id),
+        db.prepare(`
+          INSERT INTO audit_log (id, action, target_type, target_id)
+          VALUES (?, 'ARCHIVE_USER', 'USER', ?)
+        `).bind(createId("audit"), id),
+      ]);
+
+      return NextResponse.json({ success: true });
+    }
 
     await prisma.$transaction(async (tx) => {
       // Archive or delete? User requested Archive action.

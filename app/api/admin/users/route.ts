@@ -1,10 +1,49 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createId, getD1Database } from "@/lib/cloudflare-db";
 import * as bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
+    const db = await getD1Database();
+    if (db) {
+      const { results } = await db.prepare(`
+        SELECT
+          u.*,
+          m.role,
+          m.status AS membership_status,
+          o.id AS org_id,
+          o.name AS org_name
+        FROM users u
+        LEFT JOIN memberships m ON m.user_id = u.id
+        LEFT JOIN organizations o ON o.id = m.organization_id
+        ORDER BY u.created_at DESC
+      `).all();
+
+      return NextResponse.json(results.map((user: any) => ({
+        id: user.id,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        name: `${user.first_name || ""} ${user.last_name || ""}`.trim(),
+        email: user.email,
+        jobTitle: user.job_title,
+        status: user.status,
+        lastLogin: user.last_login || "Never",
+        created: String(user.created_at || "").split(" ")[0],
+        memberships: user.org_id ? [{
+          orgId: user.org_id,
+          orgName: user.org_name,
+          role: user.role,
+          status: user.membership_status,
+        }] : [],
+        org: user.org_name || "No Organization",
+        role: user.role || "VIEWER",
+      })));
+    }
+
     const users = await prisma.user.findMany({
       include: {
         memberships: {
@@ -66,6 +105,54 @@ export async function POST(request: Request) {
     // Validation
     if (!email || !organizationId || !role) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    const db = await getD1Database();
+    if (db) {
+      const existingUser = await db.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
+      if (existingUser) {
+        return NextResponse.json({ error: "Email already exists" }, { status: 400 });
+      }
+
+      const userId = createId("user");
+      const membershipId = createId("membership");
+      const inviteId = createId("invite");
+      const auditId = createId("audit");
+      const passwordHash = password ? await bcrypt.hash(password, 10) : null;
+      const userStatus = sendInvite ? "INVITED" : (status || "ACTIVE");
+
+      const statements = [
+        db.prepare(`
+          INSERT INTO users (id, email, first_name, last_name, job_title, password_hash, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).bind(userId, email, firstName || null, lastName || null, jobTitle || null, passwordHash, userStatus),
+        db.prepare(`
+          INSERT INTO memberships (id, user_id, organization_id, role, status)
+          VALUES (?, ?, ?, ?, 'ACTIVE')
+        `).bind(membershipId, userId, organizationId, role),
+        db.prepare(`
+          INSERT INTO audit_log (id, action, target_type, target_id, metadata)
+          VALUES (?, 'PROVISION_USER', 'USER', ?, ?)
+        `).bind(auditId, userId, JSON.stringify({ email, role, organizationId })),
+      ];
+
+      if (sendInvite) {
+        statements.push(db.prepare(`
+          INSERT INTO audit_log (id, action, target_type, target_id, metadata)
+          VALUES (?, 'CREATE_INVITE', 'USER', ?, ?)
+        `).bind(inviteId, userId, JSON.stringify({ email, role, organizationId, inviteToken: randomUUID() })));
+      }
+
+      await db.batch(statements);
+
+      return NextResponse.json({
+        id: userId,
+        email,
+        firstName,
+        lastName,
+        jobTitle,
+        status: userStatus,
+      });
     }
 
     const existingUser = await prisma.user.findUnique({ where: { email } });

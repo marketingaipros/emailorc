@@ -1,0 +1,8 @@
+APP_ENV=demo
+BRAIN_API_MODE=demo
+AUTO_SEND_ENABLED=false
+HUMAN_APPROVAL_REQUIRED=true
+CRM_INTEGRATIONS_ENABLED=false
+EMAIL_INTEGRATIONS_ENABLED=false
+OPENROUTER_API_KEY=sk-or-v1-replace-with-local-test-key
+AUTH_SECRET=replace-with-local-demo-secret
