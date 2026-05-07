@@ -23,6 +23,7 @@ export function Header() {
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [envMode, setEnvMode] = useState<"DEMO" | "TEST_LIVE" | "PRODUCTION">("DEMO");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,6 +38,25 @@ export function Header() {
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const resolveEnvMode = () => {
+      const saved = localStorage.getItem("envConfig");
+      if (saved) return JSON.parse(saved).mode || "DEMO";
+      if (window.location.hostname.includes("test-live")) return "TEST_LIVE";
+      if (window.location.hostname.includes("production")) return "PRODUCTION";
+      return "DEMO";
+    };
+
+    const updateEnv = () => setEnvMode(resolveEnvMode());
+    updateEnv();
+    window.addEventListener("storage", updateEnv);
+    const interval = setInterval(updateEnv, 1000);
+    return () => {
+      window.removeEventListener("storage", updateEnv);
+      clearInterval(interval);
+    };
   }, []);
 
   const handleLogout = () => {
@@ -70,23 +90,6 @@ export function Header() {
         
         <div className="flex items-center gap-x-4 lg:gap-x-6">
           {(() => {
-            const [env, setEnv] = useState<{ mode: string }>({ mode: 'DEMO' });
-            useEffect(() => {
-              const saved = localStorage.getItem("envConfig");
-              if (saved) setEnv(JSON.parse(saved));
-              
-              const handleStorage = () => {
-                const updated = localStorage.getItem("envConfig");
-                if (updated) setEnv(JSON.parse(updated));
-              };
-              window.addEventListener('storage', handleStorage);
-              const interval = setInterval(handleStorage, 1000); // Polling as fallback for same-window updates
-              return () => {
-                window.removeEventListener('storage', handleStorage);
-                clearInterval(interval);
-              };
-            }, []);
-
             const badgeStyles: Record<string, string> = {
               DEMO: "bg-indigo-50 border-indigo-100 text-indigo-700",
               TEST_LIVE: "bg-amber-50 border-amber-100 text-amber-700",
@@ -100,9 +103,9 @@ export function Header() {
             };
 
             return (
-              <div className={`hidden md:flex items-center gap-2 px-3 py-1 rounded-full border text-[10px] font-bold uppercase tracking-widest ${badgeStyles[env.mode] || badgeStyles.DEMO}`}>
+              <div className={`hidden md:flex items-center gap-2 px-3 py-1 rounded-full border text-[10px] font-bold uppercase tracking-widest ${badgeStyles[envMode] || badgeStyles.DEMO}`}>
                 <Zap className="h-3 w-3 fill-current" />
-                {labels[env.mode] || labels.DEMO}
+                {labels[envMode] || labels.DEMO}
               </div>
             );
           })()}
@@ -122,12 +125,12 @@ export function Header() {
               className="flex items-center gap-3 p-1 rounded-xl hover:bg-slate-50 transition-all group"
             >
               <div className="h-8 w-8 rounded-lg bg-slate-950 flex items-center justify-center text-white font-bold text-xs shadow-lg group-hover:scale-105 transition-transform">
-                {name?.substring(0, 2).toUpperCase() || "JS"}
+                {name?.substring(0, 2).toUpperCase() || "U"}
               </div>
               <div className="hidden lg:flex flex-col items-start">
-                <span className="text-xs font-bold text-slate-900 leading-none">{name || "Jane Smith"}</span>
+                <span className="text-xs font-bold text-slate-900 leading-none">{name || "Signed In User"}</span>
                 <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest mt-1">
-                  {role?.replace('_', ' ') || "Client"}
+                  {role?.replace('_', ' ') || "USER"}
                 </span>
               </div>
               <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isProfileOpen ? 'rotate-180' : ''}`} />
@@ -137,7 +140,7 @@ export function Header() {
               <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-100 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="px-4 py-3 bg-slate-50 border-b border-slate-100">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Logged in as</p>
-                  <p className="text-xs font-bold text-slate-900 truncate mt-0.5">{email || "admin@demo.com"}</p>
+                  <p className="text-xs font-bold text-slate-900 truncate mt-0.5">{email || "No email"}</p>
                 </div>
                 
                 <div className="p-1.5">

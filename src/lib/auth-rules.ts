@@ -1,0 +1,61 @@
+export type UserRole = "SUPER_ADMIN" | "CLIENT_ADMIN" | "EDITOR" | "REVIEWER" | "VIEWER";
+
+const ROLE_ROUTES: Record<UserRole, string[]> = {
+  SUPER_ADMIN: ["/mvp"],
+  CLIENT_ADMIN: [
+    "/mvp",
+    "/mvp/upload",
+    "/mvp/records",
+    "/mvp/drafts",
+    "/mvp/campaigns",
+    "/mvp/reply",
+    "/mvp/export",
+    "/mvp/integrations",
+    "/mvp/howto",
+    "/mvp/brain-center",
+    "/mvp/settings",
+    "/mvp/profile",
+  ],
+  EDITOR: [
+    "/mvp",
+    "/mvp/upload",
+    "/mvp/records",
+    "/mvp/drafts",
+    "/mvp/campaigns",
+    "/mvp/reply",
+    "/mvp/howto",
+    "/mvp/profile",
+  ],
+  REVIEWER: [
+    "/mvp",
+    "/mvp/records",
+    "/mvp/drafts",
+    "/mvp/campaigns",
+    "/mvp/reply",
+    "/mvp/howto",
+    "/mvp/profile",
+  ],
+  VIEWER: [
+    "/mvp",
+    "/mvp/records",
+    "/mvp/campaigns",
+    "/mvp/howto",
+    "/mvp/profile",
+  ],
+};
+
+export function canAccessPath(role: string | null, pathname: string) {
+  if (!role || !(role in ROLE_ROUTES)) return false;
+  if (role === "SUPER_ADMIN") return pathname.startsWith("/mvp");
+
+  const routes = ROLE_ROUTES[role as UserRole];
+  return routes.some((route) => {
+    if (route === "/mvp") return pathname === "/mvp";
+    return pathname === route || pathname.startsWith(`${route}/`);
+  });
+}
+
+export function canUseNavItem(role: string | null, href: string, adminOnly?: boolean) {
+  if (adminOnly) return role === "SUPER_ADMIN";
+  return canAccessPath(role, href);
+}

@@ -4,7 +4,13 @@ import { users } from "../fixtures/users";
 
 const csvFixture = path.join(__dirname, "../fixtures/contacts-3-records.csv");
 
-async function login(page: Page, user: typeof users.superAdmin | typeof users.clientAdmin) {
+async function clearSession(page: Page) {
+  await page.goto("/login");
+  await page.evaluate(() => localStorage.clear());
+}
+
+async function login(page: Page, user: (typeof users)[keyof typeof users]) {
+  await clearSession(page);
   await page.goto("/login");
   await page.getByPlaceholder("name@company.com").fill(user.email);
   await page.getByPlaceholder("••••••••").fill(user.password);
@@ -14,22 +20,66 @@ async function login(page: Page, user: typeof users.superAdmin | typeof users.cl
   await expect(page.locator("body")).toContainText(user.role.replace("_", " "));
 }
 
-async function loginWithQuickAccess(page: Page, account: "Super Admin" | "Client Demo") {
+async function loginWithQuickAccess(page: Page, account: RegExp | string) {
+  await clearSession(page);
   await page.goto("/login");
-  await page.getByRole("button", { name: account }).click();
+  await page.getByRole("button", { name: account, exact: typeof account === "string" }).click();
   await page.waitForURL("**/mvp", { timeout: 15000 });
   await expect(page.getByRole("main")).toContainText("Account Growth Command Center", { timeout: 15000 });
 }
 
 test.describe("EmailORC manual QA coverage", () => {
+  test("root, old dashboard, and protected MVP routes require login", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForURL("**/login");
+    await expect(page.getByRole("heading", { name: /growth center/i })).toBeVisible();
+
+    await page.goto("/dashboard");
+    await page.waitForURL("**/login");
+    await expect(page.getByRole("heading", { name: /growth center/i })).toBeVisible();
+
+    await page.goto("/mvp/upload");
+    await page.waitForURL("**/login");
+    await expect(page.getByPlaceholder("name@company.com")).toBeVisible();
+  });
+
   test("login and logout work for Super Admin and Client Admin", async ({ page }) => {
-    await loginWithQuickAccess(page, "Super Admin");
+    await loginWithQuickAccess(page, /super admin demo/i);
     await page.getByRole("button", { name: /sign out/i }).click();
     await expect(page.getByRole("heading", { name: /growth center/i })).toBeVisible();
 
     await login(page, users.clientAdmin);
     await page.getByRole("button", { name: /sign out/i }).click();
     await expect(page.getByRole("heading", { name: /growth center/i })).toBeVisible();
+  });
+
+  test("all seeded demo role quick logins work", async ({ page }) => {
+    for (const account of [
+      { button: /super admin demo/i, role: "SUPER ADMIN" },
+      { button: /client admin demo/i, role: "CLIENT ADMIN" },
+      { button: /editor demo/i, role: "EDITOR" },
+      { button: /reviewer demo/i, role: "REVIEWER" },
+      { button: "Viewer Demo", role: "VIEWER" },
+    ]) {
+      await loginWithQuickAccess(page, account.button);
+      await expect(page.locator("body")).toContainText(account.role);
+      await page.getByRole("button", { name: /sign out/i }).click();
+      await expect(page.getByRole("heading", { name: /growth center/i })).toBeVisible();
+    }
+  });
+
+  test("Viewer is blocked from edit/export/admin routes", async ({ page }) => {
+    await login(page, users.viewer);
+    await expect(page.getByRole("link", { name: /export center/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /admin console/i })).toHaveCount(0);
+
+    await page.goto("/mvp/export");
+    await page.waitForURL("**/mvp");
+    await expect(page.getByRole("heading", { name: /account growth command center/i })).toBeVisible();
+
+    await page.goto("/mvp/admin");
+    await page.waitForURL("**/mvp");
+    await expect(page.getByRole("heading", { name: /enterprise governance/i })).not.toBeVisible();
   });
 
   test("role-based navigation hides Admin Console from Client Admin", async ({ page }) => {

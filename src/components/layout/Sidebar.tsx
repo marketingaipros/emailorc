@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { canUseNavItem } from "@/lib/auth-rules";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -56,11 +57,21 @@ export function Sidebar() {
   const [role, setRole] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
+  const [envMode, setEnvMode] = useState<"DEMO" | "TEST_LIVE" | "PRODUCTION">("DEMO");
 
   useEffect(() => {
     setRole(localStorage.getItem("userRole"));
     setEmail(localStorage.getItem("userEmail"));
     setName(localStorage.getItem("userName"));
+
+    const saved = localStorage.getItem("envConfig");
+    if (saved) {
+      setEnvMode(JSON.parse(saved).mode || "DEMO");
+    } else if (window.location.hostname.includes("test-live")) {
+      setEnvMode("TEST_LIVE");
+    } else if (window.location.hostname.includes("production")) {
+      setEnvMode("PRODUCTION");
+    }
   }, []);
 
   const handleLogout = () => {
@@ -77,8 +88,7 @@ export function Sidebar() {
   };
 
   const filteredNav = navigation.filter(item => {
-    if (item.adminOnly) return role === "SUPER_ADMIN";
-    return true;
+    return canUseNavItem(role, item.href, item.adminOnly);
   });
 
   return (
@@ -117,7 +127,9 @@ export function Sidebar() {
       {!pathname.includes('/admin') && (
         <div className="px-4 py-3 mx-3 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl flex items-center gap-2 mt-4">
           <Zap className="h-3.5 w-3.5 text-indigo-400 fill-indigo-400" />
-          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Demo Sandbox</span>
+          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">
+            {envMode === "TEST_LIVE" ? "Test Live Environment" : envMode === "PRODUCTION" ? "Production Environment" : "Demo Environment"}
+          </span>
         </div>
       )}
 

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { Brain, Lock, Mail, Loader2, ChevronRight, ShieldCheck, UserPlus, UserCircle2 } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Brain, Lock, Mail, Loader2, ChevronRight, ShieldCheck, UserCircle2, Pencil, Eye, ClipboardCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
@@ -11,12 +11,22 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const demoAccounts = {
-    admin: { email: "admin@demo.com", password: "DemoAdmin123!" },
-    client: { email: "client@demo.com", password: "DemoClient123!" }
-  };
+  const demoAccounts = [
+    { label: "Super Admin Demo", email: "admin@demo.com", password: "DemoAdmin123!", icon: ShieldCheck, color: "indigo" },
+    { label: "Client Admin Demo", email: "client@demo.com", password: "DemoClient123!", icon: UserCircle2, color: "emerald" },
+    { label: "Editor Demo", email: "editor@demo.com", password: "DemoEditor123!", icon: Pencil, color: "sky" },
+    { label: "Reviewer Demo", email: "reviewer@demo.com", password: "DemoReviewer123!", icon: ClipboardCheck, color: "amber" },
+    { label: "Viewer Demo", email: "viewer@demo.com", password: "DemoViewer123!", icon: Eye, color: "slate" },
+  ];
 
-  const handleLogin = async (e?: React.FormEvent, credentials?: typeof demoAccounts.admin) => {
+  useEffect(() => {
+    const userId = localStorage.getItem("userId");
+    const userEmail = localStorage.getItem("userEmail");
+    const userRole = localStorage.getItem("userRole");
+    if (userId && userEmail && userRole) router.replace("/mvp");
+  }, [router]);
+
+  const handleLogin = async (e?: React.FormEvent, credentials?: { email: string; password: string }) => {
     if (e) e.preventDefault();
     setIsLoading(true);
     setError("");
@@ -44,6 +54,7 @@ export default function LoginPage() {
       localStorage.setItem("userOrg", data.orgName);
       localStorage.setItem("orgId", data.orgId);
       localStorage.setItem("userId", data.id);
+      localStorage.setItem("sessionCreatedAt", new Date().toISOString());
 
       router.push("/mvp");
     } catch (err: any) {
@@ -133,21 +144,21 @@ export default function LoginPage() {
             <div className="relative flex justify-center text-[10px] uppercase font-black tracking-widest"><span className="bg-slate-950 px-3 text-slate-600">Quick Access Demo</span></div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <button 
-              onClick={() => handleLogin(undefined, demoAccounts.admin)}
-              className="flex flex-col items-center gap-2 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl hover:bg-indigo-500/20 transition-all group"
-            >
-               <ShieldCheck className="h-5 w-5 text-indigo-400" />
-               <span className="text-[10px] font-bold text-white uppercase tracking-wider">Super Admin</span>
-            </button>
-            <button 
-              onClick={() => handleLogin(undefined, demoAccounts.client)}
-              className="flex flex-col items-center gap-2 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl hover:bg-emerald-500/20 transition-all group"
-            >
-               <UserCircle2 className="h-5 w-5 text-emerald-400" />
-               <span className="text-[10px] font-bold text-white uppercase tracking-wider">Client Demo</span>
-            </button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {demoAccounts.map((account) => {
+              const Icon = account.icon;
+              return (
+                <button
+                  key={account.email}
+                  type="button"
+                  onClick={() => handleLogin(undefined, account)}
+                  className="flex items-center gap-3 p-3 bg-slate-800/40 border border-white/10 rounded-2xl hover:bg-slate-800 transition-all group text-left"
+                >
+                  <Icon className="h-5 w-5 text-indigo-400 shrink-0" />
+                  <span className="text-[10px] font-bold text-white uppercase tracking-wider">{account.label}</span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="pt-4 flex flex-col items-center gap-4">

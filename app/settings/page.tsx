@@ -1,1 +1,5 @@
-export default function Settings(){return <main className='p-8'><h1 className='text-2xl font-bold mb-4'>Settings</h1><div className='bg-white border rounded p-4'>Provider/API keys, brand voice, banned phrases.</div></main>}
+import { redirect } from "next/navigation";
+
+export default function SettingsRedirect() {
+  redirect("/mvp/settings");
+}

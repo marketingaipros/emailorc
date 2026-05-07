@@ -11,5 +11,22 @@ export const users = {
     role: "CLIENT_ADMIN",
     name: "Client Admin",
   },
+  editor: {
+    email: "editor@demo.com",
+    password: "DemoEditor123!",
+    role: "EDITOR",
+    name: "Demo Editor",
+  },
+  reviewer: {
+    email: "reviewer@demo.com",
+    password: "DemoReviewer123!",
+    role: "REVIEWER",
+    name: "Demo Reviewer",
+  },
+  viewer: {
+    email: "viewer@demo.com",
+    password: "DemoViewer123!",
+    role: "VIEWER",
+    name: "Demo Viewer",
+  },
 } as const;
-

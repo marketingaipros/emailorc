@@ -7,6 +7,10 @@ export async function getD1Database(): Promise<MaybeD1> {
     return null;
   }
 
+  if (!process.env.APP_ENV && process.env.NODE_ENV !== "production") {
+    return null;
+  }
+
   try {
     const mod = await import("@opennextjs/cloudflare");
     const context = await mod.getCloudflareContext({ async: true });

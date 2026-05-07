@@ -1,1 +1,5 @@
-export default function Dashboard(){const cards=['Total Rows Uploaded','Rows Processed','Rows Needing Review','Final Output Ready','Average QA Score'];return <main className='p-8'><h1 className='text-2xl font-bold mb-6'>Dashboard</h1><div className='grid grid-cols-1 md:grid-cols-3 gap-4'>{cards.map(c=><div key={c} className='bg-white border rounded p-4'><p className='text-sm text-slate-500'>{c}</p><p className='text-xl font-semibold'>--</p></div>)}</div></main>}
+import { redirect } from "next/navigation";
+
+export default function Dashboard() {
+  redirect("/mvp");
+}
