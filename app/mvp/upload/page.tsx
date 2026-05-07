@@ -1,27 +1,115 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
-import { UploadCloud, FileText, ShieldCheck, Zap, CheckCircle, Loader2, Copy, RefreshCw } from "lucide-react";
+import { CheckCircle, FileText, Loader2, PlusCircle, RefreshCw, Save, ShieldCheck, UploadCloud, Zap } from "lucide-react";
 import { useNotice } from "@/components/notice/NoticeProvider";
+import {
+  APP_MINDSET_KEY,
+  BUSINESS_KNOWLEDGE_KEY,
+  DEFAULT_APP_MINDSET,
+  DEFAULT_BUSINESS_KNOWLEDGE,
+  DEFAULT_OFFERS,
+  MAPPING_TEMPLATES_KEY,
+  OFFER_LIBRARY_KEY,
+  type AiContextUsed,
+  type AppMindset,
+  type BusinessKnowledge,
+  type MappingTemplate,
+  type OfferItem,
+  loadJson,
+  loadJsonArray,
+  splitList,
+} from "@/lib/brain-context";
 
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
 const QA_APPROVAL_THRESHOLD = 90;
-const FIELD_DEFS = [
-  { key: "name", label: "Contact Name", aliases: ["Name", "name", "Full Name", "Contact Name", "Customer Name", "First Name"], required: true },
-  { key: "company", label: "Company", aliases: ["Company", "company", "Company Name", "Account", "Business Name"], required: true },
-  { key: "email", label: "Email", aliases: ["Email", "email", "Email Address", "Contact Email"], required: true },
-  { key: "product", label: "Current Product", aliases: ["Current Product", "Product", "Plan", "Current Plan"], required: false },
-  { key: "renewalDate", label: "Renewal Date", aliases: ["Renewal Date", "Renewal_Date", "Renewal"], required: false },
-  { key: "dnc", label: "Do Not Contact", aliases: ["Do Not Contact", "DNC", "do_not_contact"], required: false },
-] as const;
 
-function readString(row: any, keys: string[], fallback = "") {
-  for (const key of keys) {
-    const value = row[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return fallback;
+const STANDARD_FIELDS = [
+  "Source Row ID",
+  "First Name",
+  "Last Name",
+  "Full Name",
+  "Decision Maker",
+  "Business Name",
+  "Company Name",
+  "Email",
+  "Phone",
+  "Website",
+  "Industry",
+  "Customer Type",
+  "Current Product",
+  "Current Service",
+  "Current Plan",
+  "Renewal Date",
+  "Days to Renew",
+  "Account Status",
+  "Last Contact Date",
+  "Notes",
+  "Pain Point",
+  "Upsell Offer",
+  "Offer Type",
+  "Lead Source",
+  "Do Not Contact",
+  "Owner / Account Manager",
+];
+
+const FIELD_ALIASES: Record<string, string[]> = {
+  "Source Row ID": ["id", "row id", "source id"],
+  "First Name": ["first", "first name", "firstname"],
+  "Last Name": ["last", "last name", "lastname"],
+  "Full Name": ["name", "full name", "contact name", "customer name"],
+  "Decision Maker": ["decision maker", "dm", "contact"],
+  "Business Name": ["business", "business name", "account"],
+  "Company Name": ["company", "company name", "organization", "account name"],
+  Email: ["email", "email address", "contact email"],
+  Phone: ["phone", "phone number", "mobile"],
+  Website: ["website", "url", "domain"],
+  Industry: ["industry", "vertical"],
+  "Customer Type": ["customer type", "client type", "segment"],
+  "Current Product": ["current product", "product"],
+  "Current Service": ["current service", "service"],
+  "Current Plan": ["current plan", "plan"],
+  "Renewal Date": ["renewal date", "renewal"],
+  "Days to Renew": ["days to renew", "days until renewal"],
+  "Account Status": ["account status", "status"],
+  "Last Contact Date": ["last contact", "last contact date"],
+  Notes: ["notes", "account notes"],
+  "Pain Point": ["pain", "pain point", "challenge"],
+  "Upsell Offer": ["upsell", "upsell offer", "offer"],
+  "Offer Type": ["offer type"],
+  "Lead Source": ["lead source", "source"],
+  "Do Not Contact": ["do not contact", "dnc", "opt out", "unsubscribe"],
+  "Owner / Account Manager": ["owner", "account manager", "rep"],
+};
+
+function normalize(value: string) {
+  return value.toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function inferMapping(headers: string[]) {
+  const normalized = Object.fromEntries(headers.map((header) => [header, normalize(header)]));
+  return Object.fromEntries(headers.map((header) => {
+    const match = STANDARD_FIELDS.find((field) => FIELD_ALIASES[field]?.some((alias) => normalized[header] === normalize(alias)));
+    return [header, match || "Ignore column"];
+  }));
+}
+
+function mappedRecord(row: Record<string, any>, mapping: Record<string, string>) {
+  const standard: Record<string, string> = {};
+  const custom: Record<string, string> = {};
+  Object.entries(mapping).forEach(([header, target]) => {
+    if (!target || target === "Ignore column") return;
+    const value = String(row[header] ?? "").trim();
+    if (!value) return;
+    if (STANDARD_FIELDS.includes(target)) standard[target] = value;
+    else custom[target] = value;
+  });
+  return { standard, custom };
+}
+
+function isDnc(value = "") {
+  return /^(true|yes|y|1|do not contact|dnc)$/i.test(value.trim());
 }
 
 function persistDrafts(drafts: any[]) {
@@ -30,25 +118,38 @@ function persistDrafts(drafts: any[]) {
 
 export default function UploadPage() {
   const notice = useNotice();
-  const [data, setData] = useState<any[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [data, setData] = useState<Record<string, any>[]>([]);
   const [results, setResults] = useState<any[]>([]);
   const [fileName, setFileName] = useState("");
   const [isDragging, setIsDragging] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
+  const [customFields, setCustomFields] = useState<string[]>([]);
+  const [newCustomField, setNewCustomField] = useState("");
+  const [templateName, setTemplateName] = useState("Manual CSV");
+  const [templates, setTemplates] = useState<MappingTemplate[]>([]);
+  const [selectedOfferId, setSelectedOfferId] = useState("");
+  const [selectedPlaybook, setSelectedPlaybook] = useState("Expansion Outreach");
+  const [businessKnowledge, setBusinessKnowledge] = useState<BusinessKnowledge>(DEFAULT_BUSINESS_KNOWLEDGE);
+  const [appMindset, setAppMindset] = useState<AppMindset>(DEFAULT_APP_MINDSET);
+  const [offers, setOffers] = useState<OfferItem[]>(DEFAULT_OFFERS);
 
-  const inferMapping = (headers: string[]) => Object.fromEntries(
-    FIELD_DEFS.map((field) => [
-      field.key,
-      field.aliases.find((alias) => headers.includes(alias)) || "",
-    ])
-  );
+  useEffect(() => {
+    setTemplates(loadJsonArray(MAPPING_TEMPLATES_KEY, []));
+    setBusinessKnowledge(loadJson(BUSINESS_KNOWLEDGE_KEY, DEFAULT_BUSINESS_KNOWLEDGE));
+    setAppMindset(loadJson(APP_MINDSET_KEY, DEFAULT_APP_MINDSET));
+    const loadedOffers = loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS);
+    setOffers(loadedOffers);
+    setSelectedOfferId(loadedOffers.find((offer) => offer.status === "Active")?.id || loadedOffers[0]?.id || "");
+  }, []);
 
-  const mappedValue = (row: any, key: string, fallback = "") => {
-    const mappedKey = fieldMapping[key];
-    const value = mappedKey ? row[mappedKey] : "";
-    return typeof value === "string" && value.trim() ? value.trim() : fallback;
-  };
+  const headers = data.length ? Object.keys(data[0]) : [];
+  const selectedOffer = offers.find((offer) => offer.id === selectedOfferId);
+
+  const previewRows = useMemo(() => data.slice(0, 5).map((row) => mappedRecord(row, fieldMapping)), [data, fieldMapping]);
+  const hasEmailMapping = Object.values(fieldMapping).includes("Email");
+  const hasIdentityMapping = ["Company Name", "Business Name", "Full Name"].some((field) => Object.values(fieldMapping).includes(field));
+  const generationBlocked = !hasEmailMapping || !selectedOfferId || !selectedPlaybook.trim();
 
   const parseFile = (file: File) => {
     setFileName(file.name);
@@ -57,315 +158,308 @@ export default function UploadPage() {
       header: true,
       skipEmptyLines: true,
       complete: (parsed) => {
-        if (parsed.data.length > 0) {
-          const rows = parsed.data as any[];
-          setData(rows);
-          setFieldMapping(inferMapping(Object.keys(rows[0] || {})));
-          notice.success(`${rows.length} records loaded and ready for mapping.`, "Upload completed");
-        } else {
+        const rows = parsed.data as Record<string, any>[];
+        if (!rows.length) {
           notice.warning("The uploaded file did not contain any records.", "Upload empty");
+          return;
         }
+        setData(rows);
+        setFieldMapping(inferMapping(Object.keys(rows[0] || {})));
+        notice.success(`${rows.length} records loaded. Review mapping and select an offer before import.`, "Upload completed");
       },
       error: (error) => notice.error(error.message || "Upload failed. Check the file format.", "Upload failed"),
     });
   };
 
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) parseFile(file);
+  const addCustomField = () => {
+    const trimmed = newCustomField.trim();
+    if (!trimmed) return;
+    setCustomFields((current) => Array.from(new Set([...current, trimmed])));
+    setNewCustomField("");
+    notice.info(`${trimmed} is now available as a custom mapping field.`, "Custom field added");
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) parseFile(file);
+  const saveTemplate = () => {
+    const template: MappingTemplate = {
+      id: `template-${Date.now()}`,
+      templateName: templateName.trim() || "Untitled Mapping",
+      sourceType: fileName || "CSV Upload",
+      fieldMappings: fieldMapping,
+      customFields,
+      createdBy: localStorage.getItem("userEmail") || "demo user",
+      organization: localStorage.getItem("orgId") || "org_demo",
+      lastUsed: new Date().toISOString(),
+    };
+    const next = [template, ...templates.filter((item) => item.templateName !== template.templateName)];
+    setTemplates(next);
+    localStorage.setItem(MAPPING_TEMPLATES_KEY, JSON.stringify(next));
+    notice.success("Mapping template saved.", "Template saved");
+  };
+
+  const loadTemplate = (template: MappingTemplate) => {
+    setFieldMapping(template.fieldMappings);
+    setCustomFields(template.customFields || []);
+    const next = templates.map((item) => item.id === template.id ? { ...item, lastUsed: new Date().toISOString() } : item);
+    setTemplates(next);
+    localStorage.setItem(MAPPING_TEMPLATES_KEY, JSON.stringify(next));
+    notice.success(`${template.templateName} mapping loaded.`, "Template loaded");
+  };
+
+  const deleteTemplate = (id: string) => {
+    const next = templates.filter((template) => template.id !== id);
+    setTemplates(next);
+    localStorage.setItem(MAPPING_TEMPLATES_KEY, JSON.stringify(next));
+    notice.info("Mapping template deleted.", "Template deleted");
   };
 
   const handleGenerate = () => {
+    if (generationBlocked) {
+      notice.warning("Map Email, select an Offer, and choose a Campaign Playbook before generation.", "Import not ready");
+      return;
+    }
+
     setIsProcessing(true);
     setTimeout(() => {
+      const bkReady = Boolean(businessKnowledge.companyName && businessKnowledge.mainValueProposition && businessKnowledge.approvedPositioningStatement);
+      const mindsetReady = Boolean(appMindset.primaryGoal && appMindset.qualityThreshold);
+      const bannedPhrases = [...splitList(appMindset.bannedPhrases), ...splitList(selectedOffer?.bannedClaims || ""), ...splitList(businessKnowledge.bannedClaims)].map(normalize);
+
       const generated = data.map((row, idx) => {
-        const name = mappedValue(row, "name");
-        const company = mappedValue(row, "company", "your organization");
-        const product = mappedValue(row, "product", "your current plan");
-        const email = mappedValue(row, "email");
-        const isDnc = /^(true|yes|y|1)$/i.test(mappedValue(row, "dnc"));
-        const score = name && email && !isDnc ? 92 + (idx % 5) : 78;
+        const { standard, custom } = mappedRecord(row, fieldMapping);
+        const fullName = standard["Full Name"] || `${standard["First Name"] || ""} ${standard["Last Name"] || ""}`.trim();
+        const company = standard["Company Name"] || standard["Business Name"] || "your organization";
+        const email = standard.Email || "";
+        const product = standard["Current Product"] || standard["Current Service"] || standard["Current Plan"] || selectedOffer?.offerName || "your current setup";
+        const contactDnc = isDnc(standard["Do Not Contact"]);
+        const hasIdentity = Boolean(company !== "your organization" || fullName);
+        const missingWarnings = [
+          !bkReady ? "Business Knowledge is incomplete. Draft quality may be limited." : "",
+          !selectedOffer ? "Offer is missing." : "",
+          selectedOffer?.status !== "Active" ? "Selected offer is not active." : "",
+          !hasIdentity ? "Company Name, Business Name, or Full Name is missing." : "",
+          !email ? "Email is missing." : "",
+          contactDnc ? "Do Not Contact record." : "",
+        ].filter(Boolean);
+        const body = `Hi ${fullName || "there"},\n\nI noticed ${company} may have an opportunity around ${standard["Pain Point"] || selectedOffer?.painPointsSolved || "missed follow-up and account growth"}. ${businessKnowledge.approvedPositioningStatement || businessKnowledge.mainValueProposition || "Our team helps turn account records into practical next-step outreach."}\n\nFor ${product}, the practical next step is ${selectedOffer?.description || "a short strategy review"} focused on ${selectedOffer?.valueOutcomes || "clearer priorities and better coverage"}.\n\nWould it be useful to schedule a quick conversation to see whether this fits ${company}'s current priorities?\n\nBest,\nAccount Growth Team`;
+        const bannedClaimsFound = bannedPhrases.some((phrase) => phrase && normalize(body).includes(phrase));
+        let score = 94 - missingWarnings.length * 5 - (bannedClaimsFound ? 12 : 0);
+        if (!email || contactDnc || !selectedOffer) score = Math.min(score, 78);
+        score = Math.max(60, Math.min(96, score));
+        const aiContext: AiContextUsed = {
+          businessKnowledgeUsed: bkReady,
+          appMindsetUsed: mindsetReady,
+          offerUsed: selectedOffer?.offerName || "Missing",
+          campaignPlaybookUsed: selectedPlaybook,
+          customFieldsUsed: Object.keys(custom),
+          missingContextWarnings: missingWarnings,
+          bannedClaimsFound,
+          finalQaResult: score >= QA_APPROVAL_THRESHOLD && !bannedClaimsFound ? "Pass" : "Needs Revision",
+        };
         return {
           ...row,
           _id: `upload-${Date.now()}-${idx}`,
-          _name: name || "Missing Name",
+          _name: fullName || standard["Decision Maker"] || "Missing Name",
           _company: company,
           _product: product,
           _email: email,
-          _dnc: isDnc,
-          _subject: `Missed growth opportunities at ${company}?`,
-          _subject2: `A simpler next step for ${company}`,
-          _preview: `Hi ${name || "there"}, we've identified a tailored growth opportunity for you...`,
-          _body: `Hi ${name || "there"},\n\nI hope things are going well at ${company}. I wanted to reach out personally because based on your usage of ${product}, our team identified a tailored upgrade path that could significantly accelerate your results.\n\nI'd love to schedule a quick 15-minute conversation to walk you through what this looks like specifically for ${company}.\n\nAre you available early next week?\n\nBest,\nAccount Growth Team`,
+          _dnc: contactDnc,
+          _subject: `${company}: practical next steps`,
+          _subject2: `A softer way to improve ${selectedOffer?.offerType?.toLowerCase() || "account"} results`,
+          _preview: `${selectedOffer?.offerName || "A practical review"} for ${company}, grounded in your current account context.`,
+          _body: body,
           _score: score,
-          _spam: isDnc ? "Blocked" : "Low",
-          _status: score >= QA_APPROVAL_THRESHOLD ? "Pending Review" : "Needs Revision",
+          _spam: contactDnc ? "Blocked" : bannedClaimsFound ? "Medium" : "Low",
+          _status: score >= QA_APPROVAL_THRESHOLD && !bannedClaimsFound ? "Pending Review" : "Needs Revision",
           _revision_count: 0,
-          _qa_issues: score >= QA_APPROVAL_THRESHOLD ? [] : ["QA score below threshold"],
+          _qa_issues: missingWarnings.concat(bannedClaimsFound ? ["Banned claim detected"] : []),
+          _revisions_made: [],
           _source: "Upload Data",
+          _standard_fields: standard,
+          _custom_fields: custom,
+          _ai_context: aiContext,
         };
       });
       setResults(generated);
       persistDrafts(generated);
       setIsProcessing(false);
-      notice.success(`${generated.length} drafts generated and validation completed.`, "Record validation completed");
-    }, 2500);
+      notice.success(`${generated.length} records imported, validated, and drafted with Brain context.`, "Import complete");
+    }, 900);
   };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    notice.info("Draft copied to clipboard.", "Copied");
-  };
-
-  const handleApprove = (idx: number) => {
-    const row = results[idx];
-    if (row?._score < QA_APPROVAL_THRESHOLD) {
-      notice.warning("Draft approval blocked. QA score must be 90 or higher.", "Approval blocked");
-      return;
-    }
-    setResults((prev) => {
-      const next = prev.map((r, i) => (
-        i === idx && r._score >= QA_APPROVAL_THRESHOLD ? { ...r, _status: "Approved" } : r
-      ));
-      persistDrafts(next);
-      return next;
-    });
-    notice.success("Draft approved.", "Approval complete");
-  };
-
-  const handleRegenerate = (idx: number) => {
-    setResults((prev) => {
-      const next = prev.map((row, i) => {
-        if (i !== idx) return row;
-        if (!row._name || !row._email || row._dnc) return row;
-        return {
-          ...row,
-          _score: 93,
-          _status: "Pending Review",
-          _body: row._body.replace("significantly accelerate your results", "improve team outcomes with a clearer upgrade path"),
-        };
-      });
-      persistDrafts(next);
-      return next;
-    });
-    notice.info("Draft regenerated with a higher QA score.", "Draft revised");
-  };
-
-  const approvedCount = results.filter((r) => r._status === "Approved").length;
-  const headers = data.length ? Object.keys(data[0]) : [];
-  const missingRequiredMappings = FIELD_DEFS.filter((field) => field.required && !fieldMapping[field.key]);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      {/* Page Header */}
+    <div className="max-w-6xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Upload Customer & Account Data</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Turn customer records into approved upsell outreach. Identify expansion opportunities and generate personalized email drafts for human review.
-        </p>
+        <p className="text-sm text-slate-500 mt-1">Upload, map, preview, select offer/playbook, validate, and generate Brain-grounded drafts.</p>
       </div>
 
-      {/* Privacy Notice */}
       <div className="flex items-start gap-3 rounded-xl bg-blue-50 border border-blue-100 px-4 py-3">
         <ShieldCheck className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
-        <div className="text-sm text-blue-700">
-          <p><span className="font-semibold">Secure System | Auto-send OFF:</span> Your data is processed locally. This MVP works through secure spreadsheet exports today so you can test the workflow before connecting live CRM or email systems later.</p>
-          <p className="mt-1 opacity-80">Manual approval is required for every draft before export or send.</p>
-        </div>
+        <p className="text-sm text-blue-700"><span className="font-semibold">Auto-send OFF:</span> mapped fields, Business Knowledge, App Mindset, and Offer Library feed generation. Human approval is still required.</p>
       </div>
 
-      {/* Upload Zone */}
       {!data.length && (
         <div
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDrop}
-          className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-16 transition-colors cursor-pointer
-            ${isDragging ? "border-indigo-400 bg-indigo-50" : "border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/40"}`}
+          onDrop={(e) => { e.preventDefault(); setIsDragging(false); const file = e.dataTransfer.files?.[0]; if (file) parseFile(file); }}
+          className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-16 transition-colors cursor-pointer ${isDragging ? "border-indigo-400 bg-indigo-50" : "border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/40"}`}
         >
-          <input type="file" accept=".csv,.xlsx" onChange={handleFileInput} className="hidden" id="csv-upload" />
+          <input type="file" accept=".csv,.xlsx" onChange={(e) => { const file = e.target.files?.[0]; if (file) parseFile(file); }} className="hidden" id="csv-upload" />
           <label htmlFor="csv-upload" className="flex flex-col items-center gap-4 cursor-pointer">
-            <div className="rounded-full bg-indigo-100 p-5">
-              <UploadCloud className="h-10 w-10 text-indigo-500" />
-            </div>
+            <div className="rounded-full bg-indigo-100 p-5"><UploadCloud className="h-10 w-10 text-indigo-500" /></div>
             <div className="text-center">
               <p className="text-base font-semibold text-slate-800">Drag & drop your CRM export here</p>
               <p className="text-sm text-slate-500 mt-1">or <span className="text-indigo-600 underline">click to browse</span></p>
-              <p className="text-xs text-slate-400 mt-2">Supports CSV and XLSX · Max 10MB</p>
+              <p className="text-xs text-slate-400 mt-2">CSV supported in this demo flow</p>
             </div>
           </label>
         </div>
       )}
 
-      {/* File Loaded — Ready to Generate */}
       {data.length > 0 && !results.length && (
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 flex items-center justify-between">
+        <div className="space-y-5">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4">
-              <div className="rounded-xl bg-emerald-100 p-3">
-                <FileText className="h-6 w-6 text-emerald-600" />
-              </div>
+              <div className="rounded-xl bg-emerald-100 p-3"><FileText className="h-6 w-6 text-emerald-600" /></div>
               <div>
                 <p className="font-semibold text-slate-800">{fileName}</p>
-                <p className="text-sm text-slate-500">{data.length} customer records loaded and validated</p>
+                <p className="text-sm text-slate-500">{data.length} records loaded · {headers.length} columns detected</p>
               </div>
             </div>
-            <button
-              onClick={handleGenerate}
-              disabled={isProcessing}
-              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md hover:bg-indigo-700 disabled:opacity-60 transition-colors"
-            >
-              {isProcessing ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
-              ) : (
-                <><Zap className="h-4 w-4" /> Generate Email Drafts</>
-              )}
+            <button onClick={handleGenerate} disabled={isProcessing || generationBlocked} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md hover:bg-indigo-700 disabled:opacity-60">
+              {isProcessing ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</> : <><Zap className="h-4 w-4" /> Validate & Generate Drafts</>}
             </button>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-            <h2 className="text-sm font-semibold text-slate-900">Field Mapping Review</h2>
-            <p className="text-xs text-slate-500 mt-1">Map required CSV columns before generating drafts. Missing mappings usually cause low QA scores.</p>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-4">
-              {FIELD_DEFS.map((field) => {
-                return (
-                  <div key={field.key} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{field.label}{field.required ? " *" : ""}</p>
-                    <select
-                      value={fieldMapping[field.key] || ""}
-                      onChange={(event) => setFieldMapping((prev) => ({ ...prev, [field.key]: event.target.value }))}
-                      className="mt-2 w-full rounded-lg border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
-                    >
-                      <option value="">Not mapped</option>
-                      {headers.map((header) => (
-                        <option key={header} value={header}>{header}</option>
-                      ))}
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+              <h2 className="text-sm font-semibold text-slate-900">Map Fields</h2>
+              <p className="text-xs text-slate-500 mt-1">Map each uploaded column to a standard field, custom field, or ignore it.</p>
+              <div className="mt-4 space-y-2">
+                {headers.map((header) => (
+                  <div key={header} className="grid grid-cols-1 md:grid-cols-[1fr_1.2fr] gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Uploaded column</p>
+                      <p className="text-sm font-semibold text-slate-800">{header}</p>
+                    </div>
+                    <select value={fieldMapping[header] || "Ignore column"} onChange={(e) => setFieldMapping((prev) => ({ ...prev, [header]: e.target.value }))} className="w-full rounded-lg border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      <option value="Ignore column">Ignore column</option>
+                      <optgroup label="Standard fields">
+                        {STANDARD_FIELDS.map((field) => <option key={field} value={field}>{field}</option>)}
+                      </optgroup>
+                      {customFields.length > 0 && (
+                        <optgroup label="Custom fields">
+                          {customFields.map((field) => <option key={field} value={field}>{field}</option>)}
+                        </optgroup>
+                      )}
                     </select>
                   </div>
-                );
-              })}
+                ))}
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                <input value={newCustomField} onChange={(e) => setNewCustomField(e.target.value)} placeholder="Create new custom field, e.g. Tax Season Volume" className="rounded-lg border-slate-200 text-sm" />
+                <button onClick={addCustomField} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><PlusCircle className="h-4 w-4" /> Add Custom Field</button>
+              </div>
             </div>
-            {missingRequiredMappings.length > 0 && (
-              <p className="text-xs font-semibold text-amber-600 mt-3">
-                Map {missingRequiredMappings.map((field) => field.label).join(", ")} to avoid blocked drafts.
-              </p>
-            )}
+
+            <div className="space-y-5">
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+                <h2 className="text-sm font-semibold text-slate-900">Offer & Playbook</h2>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Offer Library Item</label>
+                  <select value={selectedOfferId} onChange={(e) => setSelectedOfferId(e.target.value)} className="mt-1 w-full rounded-lg border-slate-200 text-sm font-semibold">
+                    <option value="">Select offer</option>
+                    {offers.map((offer) => <option key={offer.id} value={offer.id}>{offer.offerName} ({offer.status})</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Campaign Playbook</label>
+                  <input value={selectedPlaybook} onChange={(e) => setSelectedPlaybook(e.target.value)} className="mt-1 w-full rounded-lg border-slate-200 text-sm font-semibold" />
+                </div>
+                {selectedOffer && selectedOffer.status !== "Active" && <p className="text-xs font-semibold text-amber-700">Selected offer is not active. Generation will warn and block approval.</p>}
+              </div>
+
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-3">
+                <h2 className="text-sm font-semibold text-slate-900">Mapping Templates</h2>
+                <div className="flex gap-2">
+                  <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} className="min-w-0 flex-1 rounded-lg border-slate-200 text-sm" />
+                  <button onClick={saveTemplate} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white"><Save className="h-3.5 w-3.5" /> Save</button>
+                </div>
+                <div className="space-y-2">
+                  {templates.map((template) => (
+                    <div key={template.id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                      <button onClick={() => loadTemplate(template)} className="text-left text-xs font-bold text-indigo-700">{template.templateName}</button>
+                      <button onClick={() => deleteTemplate(template.id)} className="text-xs font-bold text-slate-400 hover:text-red-600">Delete</button>
+                    </div>
+                  ))}
+                  {!templates.length && <p className="text-xs text-slate-500">No saved templates yet.</p>}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+            <h2 className="text-sm font-semibold text-slate-900">Preview First 5 Rows</h2>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="text-slate-400 uppercase tracking-widest">
+                  <tr><th className="p-2">Email</th><th className="p-2">Identity</th><th className="p-2">Offer</th><th className="p-2">Custom Fields</th><th className="p-2">Status</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {previewRows.map(({ standard, custom }, index) => {
+                    const email = standard.Email || "";
+                    const identity = standard["Company Name"] || standard["Business Name"] || standard["Full Name"] || "";
+                    return (
+                      <tr key={index}>
+                        <td className="p-2 font-semibold text-slate-700">{email || "Missing email"}</td>
+                        <td className="p-2 text-slate-600">{identity || "Needs review"}</td>
+                        <td className="p-2 text-slate-600">{selectedOffer?.offerName || "Missing offer"}</td>
+                        <td className="p-2 text-slate-600">{Object.keys(custom).join(", ") || "None"}</td>
+                        <td className={`p-2 font-bold ${email ? "text-emerald-600" : "text-red-600"}`}>{email ? "Validatable" : "Blocked"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {(!hasEmailMapping || !hasIdentityMapping) && <p className="mt-3 text-xs font-semibold text-amber-700">Required check: Email is required. Company Name, Business Name, or Full Name is strongly required and will mark records Needs Review if missing.</p>}
           </div>
         </div>
       )}
 
-      {/* Results */}
       {results.length > 0 && (
         <div className="space-y-4">
-          {/* Summary bar */}
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-900">
-              Generated Drafts
-              <span className="ml-2 text-sm font-normal text-slate-500">{approvedCount} of {results.length} approved</span>
-            </h2>
-            <button
-              onClick={() => { setData([]); setResults([]); setFileName(""); }}
-              className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700"
-            >
-              <RefreshCw className="h-4 w-4" /> Start Over
-            </button>
+            <h2 className="text-lg font-semibold text-slate-900">Generated Drafts <span className="ml-2 text-sm font-normal text-slate-500">{results.length} total</span></h2>
+            <button onClick={() => { setData([]); setResults([]); setFileName(""); }} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700"><RefreshCw className="h-4 w-4" /> Start Over</button>
           </div>
-
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              ["ORC", "Validation complete"],
-              ["SENTINEL", "Strategy generated"],
-              ["SCRIBE", "Email drafted"],
-              ["LEXI", "QA scored"],
-            ].map(([role, status]) => (
-              <div key={role} className="rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
-                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">{role}</p>
-                <p className="text-xs text-slate-500 mt-1">{status}</p>
+            {["ORC validation", "SENTINEL strategy", "SCRIBE draft", "LEXI QA"].map((label) => (
+              <div key={label} className="rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
+                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">{label}</p>
+                <p className="text-xs text-slate-500 mt-1">Context applied</p>
               </div>
             ))}
           </div>
-
-          {results.map((row, idx) => (
-            <div
-              key={idx}
-              className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all
-                ${row._status === "Approved" ? "border-emerald-300" : "border-slate-100"}`}
-            >
-              {/* Card Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          {results.map((row) => (
+            <div key={row._id} className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="font-semibold text-slate-900">{row._name || row.Name || row.name || "Customer"}</p>
-                  <p className="text-sm text-slate-500">{row._company || row.Company || row.company || "Company"}</p>
+                  <p className="font-semibold text-slate-900">{row._name}</p>
+                  <p className="text-sm text-slate-500">{row._company} · {row._ai_context.offerUsed}</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                    QA Score: {row._score}/100
-                  </span>
-                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
-                    {row._dnc ? "Do Not Contact" : `Spam Risk: ${row._spam}`}
-                  </span>
-                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full border
-                    ${row._status === "Approved"
-                      ? "bg-emerald-100 text-emerald-700 border-emerald-200"
-                      : "bg-amber-50 text-amber-700 border-amber-100"}`}>
-                    {row._status}
-                  </span>
-                </div>
+                <span className={`rounded-full border px-3 py-1 text-xs font-bold ${row._score >= 90 ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>QA {row._score} · {row._status}</span>
               </div>
-
-              {/* Draft Content */}
-              <div className="px-6 py-4 space-y-3">
-                <div>
-                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Subject Line</p>
-                  <p className="text-sm font-medium text-slate-800">{row._subject}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Email Draft</p>
-                  <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed bg-slate-50 rounded-xl p-4 border border-slate-100">
-                    {row._body}
-                  </p>
-                </div>
+              <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-700 whitespace-pre-wrap">{row._body}</div>
+              <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                <span className="rounded-lg bg-indigo-50 px-3 py-1 font-bold text-indigo-700">Business Knowledge: {row._ai_context.businessKnowledgeUsed ? "Yes" : "No"}</span>
+                <span className="rounded-lg bg-violet-50 px-3 py-1 font-bold text-violet-700">App Mindset: {row._ai_context.appMindsetUsed ? "Yes" : "No"}</span>
+                <span className="rounded-lg bg-slate-100 px-3 py-1 font-bold text-slate-700">Custom fields: {row._ai_context.customFieldsUsed.length || 0}</span>
               </div>
-
-              {/* Action Bar */}
-              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
-                <button
-                  onClick={() => copyToClipboard(`Subject: ${row._subject}\n\n${row._body}`)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-                >
-                  <Copy className="h-4 w-4" /> Copy
-                </button>
-                {row._score < QA_APPROVAL_THRESHOLD && !row._dnc && row._email && row._name && (
-                  <button
-                    onClick={() => handleRegenerate(idx)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-                  >
-                    <RefreshCw className="h-4 w-4" /> Regenerate to 90+
-                  </button>
-                )}
-                {row._status !== "Approved" ? (
-                  <button
-                    onClick={() => handleApprove(idx)}
-                    aria-disabled={row._score < QA_APPROVAL_THRESHOLD}
-                    className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white transition-colors shadow-sm ${
-                      row._score < QA_APPROVAL_THRESHOLD ? "bg-slate-300 text-slate-600 cursor-not-allowed" : "bg-indigo-600 hover:bg-indigo-700"
-                    }`}
-                  >
-                    <CheckCircle className="h-4 w-4" /> {row._score >= QA_APPROVAL_THRESHOLD ? "Approve Draft" : "Needs 90+ QA"}
-                  </button>
-                ) : (
-                  <span className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">
-                    <CheckCircle className="h-4 w-4" /> Approved
-                  </span>
-                )}
-              </div>
+              {row._qa_issues.length > 0 && <p className="mt-3 text-xs font-semibold text-amber-700">{row._qa_issues.join(" · ")}</p>}
+              {row._score >= QA_APPROVAL_THRESHOLD && <div className="mt-4 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"><CheckCircle className="h-4 w-4" /> Ready for Draft Review</div>}
             </div>
           ))}
         </div>

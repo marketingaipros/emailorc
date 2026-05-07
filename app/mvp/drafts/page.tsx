@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, ShieldAlert, AlertTriangle } from "lucide-react";
 import { useNotice } from "@/components/notice/NoticeProvider";
+import type { AiContextUsed } from "@/lib/brain-context";
 
 type ApprovalStatus = "Pending Review" | "Approved" | "Regenerate";
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
@@ -28,6 +29,10 @@ interface Draft {
   qaIssues?: string[];
   revisionsMade?: string[];
   sourceIndex?: number;
+  aiContext?: AiContextUsed;
+  customFields?: Record<string, string>;
+  offerName?: string;
+  campaignPlaybook?: string;
 }
 
 const SPAM_COLOR: Record<string, string> = {
@@ -81,6 +86,8 @@ export default function DraftsPage() {
     if (draft.qaScore < QA_APPROVAL_THRESHOLD) issues.push("QA score below threshold");
     if (draft.spamRisk === "High") issues.push("Spam risk is high");
     if (!draft.name || !draft.company || !draft.body || !draft.subject1 || !draft.subject2) issues.push("Draft missing required fields");
+    if (draft.aiContext?.missingContextWarnings?.some((warning) => /offer is missing|business knowledge is incomplete/i.test(warning))) issues.push("Required Brain context missing");
+    if (draft.aiContext?.bannedClaimsFound) issues.push("Banned claim detected");
     return Array.from(new Set(issues));
   }
 
@@ -90,6 +97,9 @@ export default function DraftsPage() {
     if (!["SUPER_ADMIN", "CLIENT_ADMIN", "REVIEWER"].includes(role)) return "User does not have approval permission";
     if (!draft.name || !draft.company || !draft.body || !draft.subject1 || !draft.subject2) return "Draft missing required fields";
     if (draft.subject1.trim().toLowerCase() === draft.subject2.trim().toLowerCase()) return "Duplicate subject lines";
+    if (draft.aiContext?.missingContextWarnings?.some((warning) => /offer is missing/i.test(warning))) return "Required offer data is missing";
+    if (draft.aiContext?.missingContextWarnings?.some((warning) => /business knowledge is incomplete/i.test(warning))) return "Required Business Knowledge is missing";
+    if (draft.aiContext?.bannedClaimsFound) return "Banned claims remain";
     if (draft.qaScore < QA_APPROVAL_THRESHOLD) return "QA score below threshold";
     if (!["Low", "Medium"].includes(draft.spamRisk)) return "Draft spam risk is too high";
     return "";
@@ -114,6 +124,8 @@ export default function DraftsPage() {
         _status: draft.status,
         _revision_count: draft.revisionCount || 0,
         _qa_issues: buildQaIssues(draft),
+        _ai_context: draft.aiContext,
+        _custom_fields: draft.customFields || {},
       }));
     localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(uploaded));
   }
@@ -151,6 +163,10 @@ export default function DraftsPage() {
         qaIssues: duplicateSubjects ? ["Duplicate subject lines"] : row._qa_issues || [],
         revisionsMade: row._revisions_made || [],
         sourceIndex: index,
+        aiContext: row._ai_context,
+        customFields: row._custom_fields || {},
+        offerName: row._ai_context?.offerUsed,
+        campaignPlaybook: row._ai_context?.campaignPlaybookUsed,
       };
       });
       const mergedUploaded = uploaded.map((draft: Draft) => ({ ...draft, ...(stateById[String(draft.id)] || {}) }));
@@ -368,6 +384,24 @@ export default function DraftsPage() {
                       </span>
                     ))}
                   </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-400">AI Context Used</p>
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Business Knowledge used</span><strong>{draft.aiContext?.businessKnowledgeUsed ? "Yes" : "No"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">App Mindset used</span><strong>{draft.aiContext?.appMindsetUsed ? "Yes" : "No"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Offer used</span><strong>{draft.aiContext?.offerUsed || draft.offerName || "Not recorded"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Campaign Playbook used</span><strong>{draft.aiContext?.campaignPlaybookUsed || draft.campaignPlaybook || "Not recorded"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Custom fields used</span><strong>{draft.aiContext?.customFieldsUsed?.join(", ") || Object.keys(draft.customFields || {}).join(", ") || "None"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Banned claims found</span><strong className={draft.aiContext?.bannedClaimsFound ? "text-red-600" : "text-emerald-600"}>{draft.aiContext?.bannedClaimsFound ? "Yes" : "No"}</strong></div>
+                  </div>
+                  {draft.aiContext?.missingContextWarnings?.length ? (
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                      <p className="text-xs font-bold text-amber-700">Missing context warnings: {draft.aiContext.missingContextWarnings.join(" · ")}</p>
+                    </div>
+                  ) : null}
+                  <p className="mt-3 text-xs font-bold text-slate-500">Final QA result: {draft.aiContext?.finalQaResult || (draft.qaScore >= 90 ? "Pass" : "Needs Revision")}</p>
                 </div>
 
                 {issues.length > 0 && (

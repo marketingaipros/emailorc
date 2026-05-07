@@ -37,6 +37,20 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useNotice } from "@/components/notice/NoticeProvider";
+import {
+  APP_MINDSET_KEY,
+  BUSINESS_KNOWLEDGE_KEY,
+  DEFAULT_APP_MINDSET,
+  DEFAULT_BUSINESS_KNOWLEDGE,
+  DEFAULT_OFFERS,
+  OFFER_LIBRARY_KEY,
+  contextStatus,
+  loadJson,
+  loadJsonArray,
+  type AppMindset,
+  type BusinessKnowledge,
+  type OfferItem,
+} from "@/lib/brain-context";
 
 type Tab = 
   | "Business Knowledge" 
@@ -158,6 +172,10 @@ export default function BrainCenterPage() {
   const [activeTab, setActiveTab] = useState<Tab>("Usage & Billing");
   const [models, setModels] = useState<ModelConfig[]>(DEFAULT_MODELS);
   const [isSaving, setIsSaving] = useState(false);
+  const [businessKnowledge, setBusinessKnowledge] = useState<BusinessKnowledge>(DEFAULT_BUSINESS_KNOWLEDGE);
+  const [appMindset, setAppMindset] = useState<AppMindset>(DEFAULT_APP_MINDSET);
+  const [offers, setOffers] = useState<OfferItem[]>(DEFAULT_OFFERS);
+  const [selectedOfferId, setSelectedOfferId] = useState(DEFAULT_OFFERS[0].id);
   
   // API Connection State
   const [apiKey, setApiKey] = useState("");
@@ -172,6 +190,13 @@ export default function BrainCenterPage() {
   useEffect(() => {
     const saved = localStorage.getItem("envConfig");
     if (saved) setEnvConfig(JSON.parse(saved));
+    const loadedBusinessKnowledge = loadJson(BUSINESS_KNOWLEDGE_KEY, DEFAULT_BUSINESS_KNOWLEDGE);
+    const loadedAppMindset = loadJson(APP_MINDSET_KEY, DEFAULT_APP_MINDSET);
+    const loadedOffers = loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS);
+    setBusinessKnowledge(loadedBusinessKnowledge);
+    setAppMindset(loadedAppMindset);
+    setOffers(loadedOffers);
+    setSelectedOfferId(loadedOffers[0]?.id || DEFAULT_OFFERS[0].id);
   }, []);
 
   // Usage & Billing Sub-tabs
@@ -319,11 +344,52 @@ export default function BrainCenterPage() {
 
   function handleSave() {
     setIsSaving(true);
+    localStorage.setItem(BUSINESS_KNOWLEDGE_KEY, JSON.stringify({ ...businessKnowledge, lastUpdated: new Date().toISOString() }));
+    localStorage.setItem(APP_MINDSET_KEY, JSON.stringify({ ...appMindset, lastUpdated: new Date().toISOString() }));
+    localStorage.setItem(OFFER_LIBRARY_KEY, JSON.stringify(offers.map((offer) => offer.id === selectedOfferId ? { ...offer, lastUpdated: new Date().toISOString() } : offer)));
     setTimeout(() => {
       setIsSaving(false);
       notice.success("Brain Center settings saved.", "Settings saved");
     }, 800);
   }
+
+  function saveBusinessKnowledge() {
+    const next = { ...businessKnowledge, lastUpdated: new Date().toISOString() };
+    setBusinessKnowledge(next);
+    localStorage.setItem(BUSINESS_KNOWLEDGE_KEY, JSON.stringify(next));
+    notice.success("Business Knowledge saved and will feed email generation.", "Business Knowledge saved");
+  }
+
+  function saveAppMindset() {
+    const next = { ...appMindset, lastUpdated: new Date().toISOString() };
+    setAppMindset(next);
+    localStorage.setItem(APP_MINDSET_KEY, JSON.stringify(next));
+    notice.success("App Mindset saved and will guide SENTINEL, SCRIBE, and LEXI.", "App Mindset saved");
+  }
+
+  function saveOffers(nextOffers = offers) {
+    const stamped = nextOffers.map((offer) => offer.id === selectedOfferId ? { ...offer, lastUpdated: new Date().toISOString() } : offer);
+    setOffers(stamped);
+    localStorage.setItem(OFFER_LIBRARY_KEY, JSON.stringify(stamped));
+    notice.success("Offer Library saved and will feed Brain generation.", "Offer Library saved");
+  }
+
+  function addOffer() {
+    const offer: OfferItem = {
+      ...DEFAULT_OFFERS[0],
+      id: `offer-${Date.now()}`,
+      offerName: "New Offer",
+      status: "Draft",
+      lastUpdated: new Date().toISOString(),
+    };
+    const next = [offer, ...offers];
+    setOffers(next);
+    setSelectedOfferId(offer.id);
+    localStorage.setItem(OFFER_LIBRARY_KEY, JSON.stringify(next));
+    notice.info("New draft offer created. Fill it out before using it in generation.", "Offer created");
+  }
+
+  const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) || offers[0];
 
   async function handleSendTestChat() {
     const prompt = chatPrompt.trim();
@@ -427,7 +493,128 @@ export default function BrainCenterPage() {
           </div>
 
           <div className="p-6">
-            {activeTab === "Model Settings" ? (
+            {activeTab === "Business Knowledge" ? (
+              <div className="space-y-6">
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-blue-700">Brain Usage</p>
+                  <p className="mt-1 text-sm text-blue-700">ORC, SENTINEL, SCRIBE, and LEXI use this as approved company truth. Missing knowledge lowers strategy confidence and draft QA.</p>
+                </div>
+                <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">Status: {contextStatus(businessKnowledge as any, ["companyName", "mainValueProposition", "approvedPositioningStatement"])}</p>
+                    <p className="text-xs text-slate-500">Last updated: {businessKnowledge.lastUpdated ? new Date(businessKnowledge.lastUpdated).toLocaleString() : "Not saved yet"}</p>
+                  </div>
+                  <button onClick={saveBusinessKnowledge} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><Save className="h-4 w-4" /> Save Business Knowledge</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[
+                    ["companyName", "Company Name"], ["website", "Website"], ["industry", "Industry"], ["businessDescription", "Business Description"],
+                    ["productsServices", "Products / Services"], ["targetCustomers", "Target Customers"], ["idealCustomerProfile", "Ideal Customer Profile"], ["customerPainPoints", "Customer Pain Points"],
+                    ["mainValueProposition", "Main Value Proposition"], ["competitiveAdvantages", "Competitive Advantages"], ["approvedPositioningStatement", "Approved Positioning Statement"], ["approvedClaims", "Approved Claims"],
+                    ["bannedClaims", "Banned Claims"], ["faqs", "FAQs"], ["caseStudies", "Case Studies / Proof Points"], ["complianceNotes", "Compliance Notes"],
+                    ["internalTerminology", "Internal Terminology"], ["wordsToAvoid", "Words to Avoid"], ["customerObjections", "Customer Objections"], ["preferredCtaLanguage", "Preferred CTA Language"],
+                  ].map(([key, label]) => (
+                    <label key={key} className="space-y-1">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+                      <textarea
+                        value={(businessKnowledge as any)[key] || ""}
+                        onChange={(e) => setBusinessKnowledge((prev) => ({ ...prev, [key]: e.target.value }))}
+                        rows={key === "businessDescription" || key === "approvedPositioningStatement" ? 4 : 3}
+                        className="w-full rounded-xl border-slate-200 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : activeTab === "App Mindset" ? (
+              <div className="space-y-6">
+                <div className="rounded-xl border border-violet-100 bg-violet-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-violet-700">Brain Usage</p>
+                  <p className="mt-1 text-sm text-violet-700">SENTINEL uses this for strategy, SCRIBE for writing, and LEXI for scoring, duplicate subject checks, banned phrases, and approval threshold rules.</p>
+                </div>
+                <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">Status: {contextStatus(appMindset as any, ["primaryGoal", "emailPhilosophy", "qualityThreshold"])}</p>
+                    <p className="text-xs text-slate-500">Last updated: {appMindset.lastUpdated ? new Date(appMindset.lastUpdated).toLocaleString() : "Default mindset active"}</p>
+                  </div>
+                  <button onClick={saveAppMindset} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><Save className="h-4 w-4" /> Save App Mindset</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[
+                    ["primaryGoal", "Primary Goal of the App"], ["emailPhilosophy", "Email Philosophy"], ["salesPhilosophy", "Sales Philosophy"], ["tonePrinciples", "Tone Principles"],
+                    ["structureRules", "Structure Rules"], ["ctaPhilosophy", "CTA Philosophy"], ["personalizationRules", "Personalization Rules"], ["deliverabilityRules", "Deliverability Rules"],
+                    ["qualityThreshold", "Quality Threshold"], ["humanApprovalRules", "Human Approval Rules"], ["noInventedFactsRule", "No Invented Facts Rule"], ["riskFramingRules", "Risk Framing Rules"],
+                    ["bannedPhrases", "Banned Phrases"], ["preferredEmailFramework", "Preferred Email Framework"], ["outputFormatRules", "Output Format Rules"],
+                  ].map(([key, label]) => (
+                    <label key={key} className="space-y-1">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+                      <textarea
+                        value={(appMindset as any)[key] || ""}
+                        onChange={(e) => setAppMindset((prev) => ({ ...prev, [key]: e.target.value }))}
+                        rows={key === "qualityThreshold" ? 1 : 3}
+                        className="w-full rounded-xl border-slate-200 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : activeTab === "Offer Library" ? (
+              <div className="space-y-6">
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-emerald-700">Brain Usage</p>
+                  <p className="mt-1 text-sm text-emerald-700">ORC validates offer status, SENTINEL builds the angle from offer triggers, SCRIBE describes the offer accurately, and LEXI blocks banned claims.</p>
+                </div>
+                <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Selected Offer</label>
+                    <select value={selectedOfferId} onChange={(e) => setSelectedOfferId(e.target.value)} className="mt-1 w-full rounded-lg border-slate-200 text-sm font-semibold">
+                      {offers.map((offer) => <option key={offer.id} value={offer.id}>{offer.offerName} ({offer.status})</option>)}
+                    </select>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={addOffer} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"><PlusCircle className="h-4 w-4" /> Add Offer</button>
+                    <button onClick={() => saveOffers()} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><Save className="h-4 w-4" /> Save Offer</button>
+                  </div>
+                </div>
+                {selectedOffer && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {[
+                      ["offerName", "Offer Name"], ["offerType", "Offer Type"], ["description", "Description"], ["targetSegment", "Target Segment"],
+                      ["bestFitCustomerType", "Best-Fit Customer Type"], ["bestFitIndustries", "Best-Fit Industries"], ["painPointsSolved", "Pain Points Solved"], ["upsellTriggers", "Upsell Triggers"],
+                      ["valueOutcomes", "Value Outcomes"], ["approvedClaims", "Approved Claims"], ["bannedClaims", "Banned Claims"], ["ctaOptions", "CTA Options"],
+                      ["discoveryCallLink", "Discovery Call Link"], ["leadMagnetLink", "Lead Magnet Link"], ["pricingNotes", "Pricing Notes"], ["qualificationRules", "Qualification Rules"],
+                      ["redFlags", "Red Flags"], ["relatedCampaignPlaybooks", "Related Campaign Playbooks"],
+                    ].map(([key, label]) => (
+                      <label key={key} className="space-y-1">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+                        <textarea
+                          value={(selectedOffer as any)[key] || ""}
+                          onChange={(e) => setOffers((current) => current.map((offer) => offer.id === selectedOffer.id ? { ...offer, [key]: e.target.value } : offer))}
+                          rows={key === "description" ? 4 : 3}
+                          className="w-full rounded-xl border-slate-200 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                        />
+                      </label>
+                    ))}
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Status</span>
+                      <select
+                        value={selectedOffer.status}
+                        onChange={(e) => setOffers((current) => current.map((offer) => offer.id === selectedOffer.id ? { ...offer, status: e.target.value as OfferItem["status"] } : offer))}
+                        className="w-full rounded-xl border-slate-200 text-sm font-semibold"
+                      >
+                        <option value="Active">Active</option>
+                        <option value="Draft">Draft</option>
+                        <option value="Archived">Archived</option>
+                      </select>
+                    </label>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Status</p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">{selectedOffer.status} · Last updated {selectedOffer.lastUpdated ? new Date(selectedOffer.lastUpdated).toLocaleString() : "not saved yet"}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : activeTab === "Model Settings" ? (
               <div className="space-y-8">
                 {/* Admin Note for GPT-5 */}
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
