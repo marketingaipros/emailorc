@@ -258,6 +258,7 @@ export default function BrainCenterPage() {
   const notice = useNotice();
   const [activeTab, setActiveTab] = useState<Tab>("Usage & Billing");
   const [models, setModels] = useState<ModelConfig[]>(DEFAULT_MODELS);
+  const [modelsLastSaved, setModelsLastSaved] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [businessKnowledge, setBusinessKnowledge] = useState<BusinessKnowledge>(DEFAULT_BUSINESS_KNOWLEDGE);
   const [appMindset, setAppMindset] = useState<AppMindset>(DEFAULT_APP_MINDSET);
@@ -365,7 +366,23 @@ export default function BrainCenterPage() {
   useEffect(() => {
     refreshUsageLogs();
     refreshApiKeyStatus();
+    refreshModelSettings();
   }, []);
+
+  async function refreshModelSettings() {
+    try {
+      const response = await fetch(`/api/brain/model-settings?org_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`);
+      const data = await response.json();
+      if (data.status === "success" && data.models?.length) {
+        const savedById = new Map(data.models.map((model: any) => [model.id, model]));
+        setModels((current) => current.map((model) => ({ ...model, ...(savedById.get(model.id) || {}) })));
+        const newest = data.models.map((model: any) => model.lastUpdated).filter(Boolean).sort().pop();
+        setModelsLastSaved(newest || null);
+      }
+    } catch {
+      // Local defaults stay usable even if persistence is unavailable.
+    }
+  }
 
   async function refreshApiKeyStatus() {
     try {
@@ -525,12 +542,38 @@ export default function BrainCenterPage() {
     setModels(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
   }
 
+  async function saveModelSettings() {
+    setIsSaving(true);
+    try {
+      localStorage.setItem("emailorcModelSettings", JSON.stringify(models));
+      const response = await fetch("/api/brain/model-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization_id: orgId || localStorage.getItem("orgId") || "org_demo",
+          user_id: userId || localStorage.getItem("userId") || "user_super_admin",
+          models,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not save model settings.");
+      const savedAt = new Date().toISOString();
+      setModelsLastSaved(savedAt);
+      notice.success(data.message || "Model settings saved and set active.", "Models saved");
+    } catch (error: any) {
+      notice.error(error.message || "Could not save model settings.", "Model save failed");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   function handleSave() {
     setIsSaving(true);
     localStorage.setItem(BUSINESS_KNOWLEDGE_KEY, JSON.stringify({ ...businessKnowledge, lastUpdated: new Date().toISOString() }));
     localStorage.setItem(APP_MINDSET_KEY, JSON.stringify({ ...appMindset, lastUpdated: new Date().toISOString() }));
     localStorage.setItem(OFFER_LIBRARY_KEY, JSON.stringify(offers.map((offer) => offer.id === selectedOfferId ? { ...offer, lastUpdated: new Date().toISOString() } : offer)));
     localStorage.setItem(DEVELOPER_KNOWLEDGE_KEY, JSON.stringify(developerKnowledge.map((item) => item.id === selectedDeveloperKnowledgeId ? { ...item, lastUpdated: new Date().toISOString() } : item)));
+    localStorage.setItem("emailorcModelSettings", JSON.stringify(models));
     setTimeout(() => {
       setIsSaving(false);
       notice.success("Brain Center settings saved.", "Settings saved");
@@ -1215,16 +1258,28 @@ export default function BrainCenterPage() {
                       <option value="Anthropic">Anthropic</option>
                       <option value="OpenAI">OpenAI</option>
                     </select>
-                    <button 
-                      onClick={() => handleSyncModels(true)}
-                      disabled={isSyncing}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`} /> 
-                      {isSyncing ? "Syncing..." : "Sync Models"}
-                    </button>
-                  </div>
-                </div>
+	                    <button 
+	                      onClick={() => handleSyncModels(true)}
+	                      disabled={isSyncing}
+	                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
+	                    >
+	                      <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`} /> 
+	                      {isSyncing ? "Syncing..." : "Sync Models"}
+	                    </button>
+	                    <button
+	                      onClick={saveModelSettings}
+	                      disabled={isSaving}
+	                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 rounded-lg text-xs font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50"
+	                    >
+	                      <Save className="h-3.5 w-3.5" />
+	                      Set Active Models
+	                    </button>
+	                  </div>
+	                </div>
+	                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+	                  <span className="font-bold text-slate-900">Sync Models</span> only refreshes available OpenRouter model IDs. <span className="font-bold text-slate-900">Set Active Models</span> saves the selected task routing to Brain Settings.
+	                  <span className="ml-2 font-bold text-indigo-700">Last saved:</span> {modelsLastSaved ? new Date(modelsLastSaved).toLocaleString() : "Not saved in this session"}
+	                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {models.map((model) => (
