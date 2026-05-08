@@ -140,7 +140,7 @@ export default function UploadPage() {
     setAppMindset(loadJson(APP_MINDSET_KEY, DEFAULT_APP_MINDSET));
     const loadedOffers = loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS);
     setOffers(loadedOffers);
-    setSelectedOfferId(loadedOffers.find((offer) => offer.status === "Active")?.id || loadedOffers[0]?.id || "");
+    setSelectedOfferId(loadedOffers.find((offer) => offer.status === "Active" || offer.status === "Approved")?.id || loadedOffers[0]?.id || "");
   }, []);
 
   const headers = data.length ? Object.keys(data[0]) : [];
@@ -220,9 +220,16 @@ export default function UploadPage() {
 
     setIsProcessing(true);
     setTimeout(() => {
-      const bkReady = Boolean(businessKnowledge.companyName && businessKnowledge.mainValueProposition && businessKnowledge.approvedPositioningStatement);
-      const mindsetReady = Boolean(appMindset.primaryGoal && appMindset.qualityThreshold);
-      const bannedPhrases = [...splitList(appMindset.bannedPhrases), ...splitList(selectedOffer?.bannedClaims || ""), ...splitList(businessKnowledge.bannedClaims)].map(normalize);
+      const approvedBusinessKnowledge = businessKnowledge.status === "Approved";
+      const approvedMindset = appMindset.status === "Approved";
+      const activeOffer = selectedOffer?.status === "Active" || selectedOffer?.status === "Approved";
+      const bkReady = approvedBusinessKnowledge && Boolean(businessKnowledge.companyName && businessKnowledge.mainValueProposition && businessKnowledge.approvedPositioningStatement);
+      const mindsetReady = approvedMindset && Boolean(appMindset.primaryGoal && appMindset.qualityThreshold);
+      const bannedPhrases = [
+        ...splitList(mindsetReady ? appMindset.bannedPhrases : DEFAULT_APP_MINDSET.bannedPhrases),
+        ...splitList(activeOffer ? selectedOffer?.bannedClaims || "" : ""),
+        ...splitList(bkReady ? businessKnowledge.bannedClaims : ""),
+      ].map(normalize);
 
       const generated = data.map((row, idx) => {
         const { standard, custom } = mappedRecord(row, fieldMapping);
@@ -233,14 +240,16 @@ export default function UploadPage() {
         const contactDnc = isDnc(standard["Do Not Contact"]);
         const hasIdentity = Boolean(company !== "your organization" || fullName);
         const missingWarnings = [
+          !approvedBusinessKnowledge ? "Business Knowledge is not approved. Draft quality may be limited." : "",
           !bkReady ? "Business Knowledge is incomplete. Draft quality may be limited." : "",
+          !approvedMindset ? "App Mindset is not approved. Default mindset rules were used." : "",
           !selectedOffer ? "Offer is missing." : "",
-          selectedOffer?.status !== "Active" ? "Selected offer is not active." : "",
+          !activeOffer ? "Selected offer is not active." : "",
           !hasIdentity ? "Company Name, Business Name, or Full Name is missing." : "",
           !email ? "Email is missing." : "",
           contactDnc ? "Do Not Contact record." : "",
         ].filter(Boolean);
-        const body = `Hi ${fullName || "there"},\n\nI noticed ${company} may have an opportunity around ${standard["Pain Point"] || selectedOffer?.painPointsSolved || "missed follow-up and account growth"}. ${businessKnowledge.approvedPositioningStatement || businessKnowledge.mainValueProposition || "Our team helps turn account records into practical next-step outreach."}\n\nFor ${product}, the practical next step is ${selectedOffer?.description || "a short strategy review"} focused on ${selectedOffer?.valueOutcomes || "clearer priorities and better coverage"}.\n\nWould it be useful to schedule a quick conversation to see whether this fits ${company}'s current priorities?\n\nBest,\nAccount Growth Team`;
+        const body = `Hi ${fullName || "there"},\n\nI noticed ${company} may have an opportunity around ${standard["Pain Point"] || (activeOffer ? selectedOffer?.painPointsSolved : "") || "missed follow-up and account growth"}. ${bkReady ? businessKnowledge.approvedPositioningStatement || businessKnowledge.mainValueProposition : "Our team helps turn account records into practical next-step outreach."}\n\nFor ${product}, the practical next step is ${activeOffer ? selectedOffer?.description : "a short strategy review"} focused on ${activeOffer ? selectedOffer?.valueOutcomes : "clearer priorities and better coverage"}.\n\nWould it be useful to schedule a quick conversation to see whether this fits ${company}'s current priorities?\n\nBest,\nAccount Growth Team`;
         const bannedClaimsFound = bannedPhrases.some((phrase) => phrase && normalize(body).includes(phrase));
         let score = 94 - missingWarnings.length * 5 - (bannedClaimsFound ? 12 : 0);
         if (!email || contactDnc || !selectedOffer) score = Math.min(score, 78);

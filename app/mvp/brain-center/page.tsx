@@ -48,6 +48,7 @@ import {
   contextStatus,
   loadJson,
   loadJsonArray,
+  type ApprovalStatus,
   type AppMindset,
   type BusinessKnowledge,
   type OfferItem,
@@ -172,14 +173,15 @@ const BUSINESS_KNOWLEDGE_FIELDS = [
   ["companyName", "Company Name"], ["website", "Website"], ["industry", "Industry"], ["businessDescription", "Business Description"],
   ["productsServices", "Products / Services"], ["targetCustomers", "Target Customers"], ["idealCustomerProfile", "Ideal Customer Profile"], ["customerPainPoints", "Customer Pain Points"],
   ["mainValueProposition", "Main Value Proposition"], ["competitiveAdvantages", "Competitive Advantages"], ["approvedPositioningStatement", "Approved Positioning Statement"], ["approvedClaims", "Approved Claims"],
-  ["bannedClaims", "Banned Claims"], ["faqs", "FAQs"], ["caseStudies", "Case Studies / Proof Points"], ["complianceNotes", "Compliance Notes"],
-  ["internalTerminology", "Internal Terminology"], ["wordsToAvoid", "Words to Avoid"], ["customerObjections", "Customer Objections"], ["preferredCtaLanguage", "Preferred CTA Language"],
+  ["bannedClaims", "Banned Claims"], ["faqs", "FAQs"], ["caseStudies", "Case Studies / Proof Points"], ["customerObjections", "Common Customer Objections"],
+  ["complianceNotes", "Compliance Notes"], ["internalTerminology", "Internal Terminology"], ["wordsToAvoid", "Words to Avoid"],
+  ["preferredCtaLanguage", "Preferred CTA Language"], ["sourceDocumentsUsed", "Source Documents Used"],
 ] as const;
 
 const APP_MINDSET_FIELDS = [
   ["primaryGoal", "Primary Goal of the App"], ["emailPhilosophy", "Email Philosophy"], ["salesPhilosophy", "Sales Philosophy"], ["tonePrinciples", "Tone Principles"],
-  ["structureRules", "Structure Rules"], ["ctaPhilosophy", "CTA Philosophy"], ["personalizationRules", "Personalization Rules"], ["deliverabilityRules", "Deliverability Rules"],
-  ["qualityThreshold", "Quality Threshold"], ["humanApprovalRules", "Human Approval Rules"], ["noInventedFactsRule", "No Invented Facts Rule"], ["riskFramingRules", "Risk Framing Rules"],
+  ["structureRules", "Email Structure Rules"], ["ctaPhilosophy", "CTA Philosophy"], ["personalizationRules", "Personalization Rules"], ["deliverabilityRules", "Deliverability Rules"],
+  ["qualityThreshold", "Quality Threshold"], ["humanApprovalRules", "Human Approval Rules"], ["noInventedFactsRule", "No Invented Facts Rule"], ["riskFramingRules", "Risk-Framing Rules"],
   ["bannedPhrases", "Banned Phrases"], ["preferredEmailFramework", "Preferred Email Framework"], ["outputFormatRules", "Output Format Rules"],
 ] as const;
 
@@ -188,8 +190,18 @@ const OFFER_FIELDS = [
   ["bestFitCustomerType", "Best-Fit Customer Type"], ["bestFitIndustries", "Best-Fit Industries"], ["painPointsSolved", "Pain Points Solved"], ["upsellTriggers", "Upsell Triggers"],
   ["valueOutcomes", "Value Outcomes"], ["approvedClaims", "Approved Claims"], ["bannedClaims", "Banned Claims"], ["ctaOptions", "CTA Options"],
   ["discoveryCallLink", "Discovery Call Link"], ["leadMagnetLink", "Lead Magnet Link"], ["pricingNotes", "Pricing Notes"], ["qualificationRules", "Qualification Rules"],
-  ["redFlags", "Red Flags"], ["relatedCampaignPlaybooks", "Related Campaign Playbooks"],
+  ["redFlags", "Red Flags"], ["relatedCampaignPlaybooks", "Related Campaign Playbooks"], ["primaryObjections", "Primary Objections"], ["approvedObjectionResponses", "Approved Objection Responses"],
 ] as const;
+
+type ExtractionTarget = "Auto-detect" | "Business Knowledge" | "App Mindset" | "Offer Library" | "Campaign Playbook";
+
+interface ExtractedField {
+  field: string;
+  extracted_value: string;
+  confidence: "High" | "Medium" | "Low";
+  source_snippet: string;
+  action: "Accept" | "Edit" | "Reject";
+}
 
 function normalizeImportKey(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -216,6 +228,25 @@ function parseKeyValueText(text: string, fields: readonly (readonly [string, str
   return next;
 }
 
+function completionScore(value: Record<string, any>, fields: readonly (readonly [string, string])[]) {
+  const filled = fields.filter(([key]) => String(value[key] || "").trim()).length;
+  return Math.round((filled / fields.length) * 100);
+}
+
+function missingFields(value: Record<string, any>, fields: readonly (readonly [string, string])[]) {
+  return fields.filter(([key]) => !String(value[key] || "").trim()).map(([, label]) => label);
+}
+
+function labelToKey(label: string, fields: readonly (readonly [string, string])[]) {
+  const normalized = normalizeImportKey(label);
+  return fields.find(([key, fieldLabel]) => [key, fieldLabel].map(normalizeImportKey).includes(normalized))?.[0];
+}
+
+function currentUserLabel() {
+  if (typeof window === "undefined") return "System";
+  return localStorage.getItem("userEmail") || localStorage.getItem("userRole") || "Demo Admin";
+}
+
 export default function BrainCenterPage() {
   const notice = useNotice();
   const [activeTab, setActiveTab] = useState<Tab>("Usage & Billing");
@@ -225,6 +256,15 @@ export default function BrainCenterPage() {
   const [appMindset, setAppMindset] = useState<AppMindset>(DEFAULT_APP_MINDSET);
   const [offers, setOffers] = useState<OfferItem[]>(DEFAULT_OFFERS);
   const [selectedOfferId, setSelectedOfferId] = useState(DEFAULT_OFFERS[0].id);
+  const [extractionTarget, setExtractionTarget] = useState<ExtractionTarget>("Auto-detect");
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractionReview, setExtractionReview] = useState<{
+    target: "business_knowledge" | "app_mindset" | "offer_library";
+    fileName: string;
+    fields: ExtractedField[];
+    warnings: string[];
+    missingFields: string[];
+  } | null>(null);
   
   // API Connection State
   const [apiKey, setApiKey] = useState("");
@@ -403,24 +443,50 @@ export default function BrainCenterPage() {
   }
 
   function saveBusinessKnowledge() {
-    const next = { ...businessKnowledge, lastUpdated: new Date().toISOString() };
+    const next = { ...businessKnowledge, status: "Draft" as ApprovalStatus, lastUpdated: new Date().toISOString() };
     setBusinessKnowledge(next);
     localStorage.setItem(BUSINESS_KNOWLEDGE_KEY, JSON.stringify(next));
-    notice.success("Business Knowledge saved and will feed email generation.", "Business Knowledge saved");
+    notice.success("Business Knowledge saved as draft.", "Draft saved");
+  }
+
+  function approveBusinessKnowledge() {
+    const next = { ...businessKnowledge, status: "Approved" as ApprovalStatus, approvedBy: currentUserLabel(), lastUpdated: new Date().toISOString() };
+    setBusinessKnowledge(next);
+    localStorage.setItem(BUSINESS_KNOWLEDGE_KEY, JSON.stringify(next));
+    notice.success("Business Knowledge approved and active for generation.", "Business Knowledge approved");
   }
 
   function saveAppMindset() {
-    const next = { ...appMindset, lastUpdated: new Date().toISOString() };
+    const next = { ...appMindset, status: "Draft" as ApprovalStatus, lastUpdated: new Date().toISOString() };
     setAppMindset(next);
     localStorage.setItem(APP_MINDSET_KEY, JSON.stringify(next));
-    notice.success("App Mindset saved and will guide SENTINEL, SCRIBE, and LEXI.", "App Mindset saved");
+    notice.success("App Mindset saved as draft.", "Draft saved");
+  }
+
+  function approveAppMindset() {
+    const next = { ...appMindset, status: "Approved" as ApprovalStatus, approvedBy: currentUserLabel(), lastUpdated: new Date().toISOString() };
+    setAppMindset(next);
+    localStorage.setItem(APP_MINDSET_KEY, JSON.stringify(next));
+    notice.success("App Mindset approved and active for SENTINEL, SCRIBE, and LEXI.", "App Mindset approved");
   }
 
   function saveOffers(nextOffers = offers) {
     const stamped = nextOffers.map((offer) => offer.id === selectedOfferId ? { ...offer, lastUpdated: new Date().toISOString() } : offer);
     setOffers(stamped);
     localStorage.setItem(OFFER_LIBRARY_KEY, JSON.stringify(stamped));
-    notice.success("Offer Library saved and will feed Brain generation.", "Offer Library saved");
+    notice.success("Offer Library saved.", "Offer Library saved");
+  }
+
+  function saveSelectedOfferDraft() {
+    const stamped = offers.map((offer) => offer.id === selectedOfferId ? { ...offer, status: "Draft" as const, lastUpdated: new Date().toISOString() } : offer);
+    saveOffers(stamped);
+    notice.success("Offer saved as draft.", "Draft saved");
+  }
+
+  function activateSelectedOffer() {
+    const stamped = offers.map((offer) => offer.id === selectedOfferId ? { ...offer, status: "Active" as const, approvedBy: currentUserLabel(), lastUpdated: new Date().toISOString() } : offer);
+    saveOffers(stamped);
+    notice.success("Offer approved and active for generation.", "Offer activated");
   }
 
   function addOffer() {
@@ -440,88 +506,95 @@ export default function BrainCenterPage() {
 
   const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) || offers[0];
 
-  function importBusinessKnowledgeFile(file: File) {
-    const finish = (next: Partial<BusinessKnowledge>) => {
-      const stamped = { ...businessKnowledge, ...next, lastUpdated: new Date().toISOString() };
-      setBusinessKnowledge(stamped);
-      localStorage.setItem(BUSINESS_KNOWLEDGE_KEY, JSON.stringify(stamped));
-      notice.success("Business Knowledge imported and saved.", "Import complete");
-    };
-
-    if (file.name.toLowerCase().endsWith(".csv")) {
-      Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (parsed) => {
-          const row = (parsed.data as Record<string, any>[])[0] || {};
-          finish(Object.fromEntries(BUSINESS_KNOWLEDGE_FIELDS.map(([key, label]) => [key, findImportValue(row, label, key)]).filter(([, value]) => value)) as Partial<BusinessKnowledge>);
-        },
-        error: (error) => notice.error(error.message || "Could not import Business Knowledge.", "Import failed"),
-      });
-      return;
-    }
-
-    file.text().then((text) => {
-      const parsed = parseKeyValueText(text, BUSINESS_KNOWLEDGE_FIELDS);
-      finish(Object.keys(parsed).length ? parsed as Partial<BusinessKnowledge> : { businessDescription: text.trim() });
-    }).catch(() => notice.error("Could not read Business Knowledge file.", "Import failed"));
-  }
-
-  function importAppMindsetFile(file: File) {
-    const finish = (next: Partial<AppMindset>) => {
-      const stamped = { ...appMindset, ...next, lastUpdated: new Date().toISOString() };
-      setAppMindset(stamped);
-      localStorage.setItem(APP_MINDSET_KEY, JSON.stringify(stamped));
-      notice.success("App Mindset imported and saved.", "Import complete");
-    };
-
-    if (file.name.toLowerCase().endsWith(".csv")) {
-      Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (parsed) => {
-          const row = (parsed.data as Record<string, any>[])[0] || {};
-          finish(Object.fromEntries(APP_MINDSET_FIELDS.map(([key, label]) => [key, findImportValue(row, label, key)]).filter(([, value]) => value)) as Partial<AppMindset>);
-        },
-        error: (error) => notice.error(error.message || "Could not import App Mindset.", "Import failed"),
-      });
-      return;
-    }
-
-    file.text().then((text) => {
-      const parsed = parseKeyValueText(text, APP_MINDSET_FIELDS);
-      finish(Object.keys(parsed).length ? parsed as Partial<AppMindset> : { emailPhilosophy: text.trim() });
-    }).catch(() => notice.error("Could not read App Mindset file.", "Import failed"));
-  }
-
-  function importOfferLibraryFile(file: File) {
-    if (!file.name.toLowerCase().endsWith(".csv")) {
-      notice.warning("Offer Library import expects a CSV with offer columns.", "CSV required");
-      return;
-    }
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (parsed) => {
-        const imported = (parsed.data as Record<string, any>[]).map((row, index) => {
-          const offer = Object.fromEntries(OFFER_FIELDS.map(([key, label]) => [key, findImportValue(row, label, key)])) as Partial<OfferItem>;
-          return {
-            ...DEFAULT_OFFERS[0],
-            ...offer,
-            id: findImportValue(row, "ID", "id") || `offer-import-${Date.now()}-${index}`,
-            offerName: offer.offerName || `Imported Offer ${index + 1}`,
-            status: (findImportValue(row, "Status", "status") as OfferItem["status"]) || "Draft",
-            lastUpdated: new Date().toISOString(),
-          };
+  async function extractFromFile(file: File, target: ExtractionTarget = extractionTarget) {
+    setIsExtracting(true);
+    try {
+      let text = "";
+      if (file.name.toLowerCase().endsWith(".csv")) {
+        text = await new Promise<string>((resolve, reject) => {
+          Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (parsed) => resolve(JSON.stringify(parsed.data, null, 2)),
+            error: reject,
+          });
         });
-        const next = [...imported, ...offers];
-        setOffers(next);
-        setSelectedOfferId(imported[0]?.id || selectedOfferId);
-        localStorage.setItem(OFFER_LIBRARY_KEY, JSON.stringify(next));
-        notice.success(`${imported.length} offers imported and saved.`, "Offer import complete");
-      },
-      error: (error) => notice.error(error.message || "Could not import Offer Library.", "Import failed"),
-    });
+      } else {
+        text = await file.text();
+      }
+
+      const response = await fetch("/api/brain/extract-knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization_id: orgId,
+          extraction_target: target,
+          uploaded_file_reference: { name: file.name, text },
+          existing_section_data: { businessKnowledge, appMindset, selectedOffer },
+          model_mode: modelMode,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.safe_error || data.message || "Extraction failed.");
+      setExtractionReview({
+        target: data.recommended_section,
+        fileName: file.name,
+        fields: (data.extracted_fields || []).map((field: ExtractedField) => ({ ...field, action: field.extracted_value ? "Accept" : "Reject" })),
+        warnings: data.warnings || [],
+        missingFields: data.missing_fields || [],
+      });
+      notice.info("Extraction ready for human review. Nothing has been activated yet.", "Review extraction");
+    } catch (error: any) {
+      notice.error(error.message || "Could not extract from file.", "Extraction failed");
+    } finally {
+      setIsExtracting(false);
+    }
+  }
+
+  function updateExtractedField(index: number, updates: Partial<ExtractedField>) {
+    setExtractionReview((current) => current ? {
+      ...current,
+      fields: current.fields.map((field, fieldIndex) => fieldIndex === index ? { ...field, ...updates } : field),
+    } : current);
+  }
+
+  function applyExtraction(saveMode: "draft" | "approved") {
+    if (!extractionReview) return;
+    const accepted = extractionReview.fields.filter((field) => field.action === "Accept" && field.extracted_value.trim());
+    const approvedBy = saveMode === "approved" ? currentUserLabel() : undefined;
+    const status = saveMode === "approved" ? "Approved" as const : "Draft" as const;
+
+    if (extractionReview.target === "business_knowledge") {
+      const nextFields = Object.fromEntries(accepted.map((field) => [labelToKey(field.field, BUSINESS_KNOWLEDGE_FIELDS), field.extracted_value]).filter(([key]) => key));
+      const next = { ...businessKnowledge, ...nextFields, sourceDocumentsUsed: extractionReview.fileName, status, approvedBy, lastUpdated: new Date().toISOString() };
+      setBusinessKnowledge(next);
+      localStorage.setItem(BUSINESS_KNOWLEDGE_KEY, JSON.stringify(next));
+    } else if (extractionReview.target === "app_mindset") {
+      const nextFields = Object.fromEntries(accepted.map((field) => [labelToKey(field.field, APP_MINDSET_FIELDS), field.extracted_value]).filter(([key]) => key));
+      const next = { ...appMindset, ...nextFields, status, approvedBy, lastUpdated: new Date().toISOString() };
+      setAppMindset(next);
+      localStorage.setItem(APP_MINDSET_KEY, JSON.stringify(next));
+    } else {
+      const nextFields = Object.fromEntries(accepted.map((field) => [labelToKey(field.field, OFFER_FIELDS), field.extracted_value]).filter(([key]) => key));
+      const offer = {
+        ...DEFAULT_OFFERS[0],
+        ...selectedOffer,
+        ...nextFields,
+        id: selectedOffer?.id || `offer-extract-${Date.now()}`,
+        status: saveMode === "approved" ? "Active" as const : "Draft" as const,
+        approvedBy,
+        lastUpdated: new Date().toISOString(),
+      };
+      const next = selectedOffer
+        ? offers.map((item) => item.id === offer.id ? offer : item)
+        : [offer, ...offers];
+      setOffers(next);
+      setSelectedOfferId(offer.id);
+      localStorage.setItem(OFFER_LIBRARY_KEY, JSON.stringify(next));
+    }
+
+    setExtractionReview(null);
+    notice.success(saveMode === "approved" ? "Accepted extraction approved and activated." : "Accepted extraction saved as draft.", saveMode === "approved" ? "Approved" : "Draft saved");
   }
 
   async function handleSendTestChat() {
@@ -626,6 +699,56 @@ export default function BrainCenterPage() {
           </div>
 
           <div className="p-6">
+            {extractionReview && (
+              <div className="mb-6 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-5">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-indigo-700">Extraction Review</p>
+                    <h3 className="mt-1 text-lg font-bold text-slate-900">{extractionReview.fileName}</h3>
+                    <p className="text-sm text-slate-600">Target: {extractionReview.target.replace("_", " ")}. Human approval is required before this data feeds generation.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => setExtractionReview(null)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600">Reject</button>
+                    <button onClick={() => applyExtraction("draft")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">Save as Draft</button>
+                    <button onClick={() => applyExtraction("approved")} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white">Approve All</button>
+                  </div>
+                </div>
+                {extractionReview.warnings.length > 0 && (
+                  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                    {extractionReview.warnings.join(" ")}
+                  </div>
+                )}
+                <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      <tr><th className="p-3">Field</th><th className="p-3">Extracted Value</th><th className="p-3">Confidence</th><th className="p-3">Source Snippet</th><th className="p-3">Action</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {extractionReview.fields.map((field, index) => (
+                        <tr key={`${field.field}-${index}`}>
+                          <td className="p-3 font-bold text-slate-800">{field.field}</td>
+                          <td className="p-3 min-w-[240px]">
+                            <textarea value={field.extracted_value} onChange={(e) => updateExtractedField(index, { extracted_value: e.target.value, action: "Edit" })} rows={2} className="w-full rounded-lg border-slate-200 text-xs" />
+                          </td>
+                          <td className="p-3">
+                            <span className={`rounded-full px-2 py-1 font-bold ${field.confidence === "High" ? "bg-emerald-50 text-emerald-700" : field.confidence === "Medium" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{field.confidence}</span>
+                          </td>
+                          <td className="p-3 max-w-[260px] text-slate-500">{field.source_snippet || "Missing"}</td>
+                          <td className="p-3">
+                            <select value={field.action} onChange={(e) => updateExtractedField(index, { action: e.target.value as ExtractedField["action"] })} className="rounded-lg border-slate-200 text-xs font-bold">
+                              <option value="Accept">Accept</option>
+                              <option value="Edit">Edit</option>
+                              <option value="Reject">Reject</option>
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {activeTab === "Business Knowledge" ? (
               <div className="space-y-6">
                 <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
@@ -635,21 +758,42 @@ export default function BrainCenterPage() {
                 <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <p className="text-sm font-bold text-slate-900">Upload Business Knowledge</p>
-                      <p className="text-xs text-slate-500">Import `.csv`, `.txt`, or `.md`. CSV headers can match field names like Company Name, Approved Claims, Banned Claims, FAQs.</p>
+                      <p className="text-sm font-bold text-slate-900">Extract From File</p>
+                      <p className="text-xs text-slate-500">Supports PDF, DOCX, TXT, CSV, XLSX, and Markdown uploads. Text/CSV/Markdown extract directly in this demo; binary documents may need exported text.</p>
                     </div>
-                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                      <Download className="h-4 w-4" /> Upload File
-                      <input type="file" accept=".csv,.txt,.md" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) importBusinessKnowledgeFile(file); e.currentTarget.value = ""; }} />
-                    </label>
+                    <div className="flex gap-2">
+                      <select value={extractionTarget} onChange={(e) => setExtractionTarget(e.target.value as ExtractionTarget)} className="rounded-lg border-slate-200 text-sm font-semibold">
+                        {["Auto-detect", "Business Knowledge", "App Mindset", "Offer Library", "Campaign Playbook"].map((target) => <option key={target} value={target}>{target}</option>)}
+                      </select>
+                      <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                        <Download className="h-4 w-4" /> {isExtracting ? "Extracting..." : "Upload File"}
+                        <input type="file" accept=".pdf,.docx,.txt,.csv,.xlsx,.md" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) extractFromFile(file, "Business Knowledge"); e.currentTarget.value = ""; }} />
+                      </label>
+                    </div>
                   </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  {[
+                    ["Completion", `${completionScore(businessKnowledge as any, BUSINESS_KNOWLEDGE_FIELDS)}%`],
+                    ["Status", businessKnowledge.status || "Draft"],
+                    ["Approved By", businessKnowledge.approvedBy || "Not approved"],
+                    ["Missing", missingFields(businessKnowledge as any, BUSINESS_KNOWLEDGE_FIELDS).slice(0, 3).join(", ") || "None"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-xl border border-slate-200 bg-white p-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">{value}</p>
+                    </div>
+                  ))}
                 </div>
                 <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
                   <div>
                     <p className="text-sm font-bold text-slate-900">Status: {contextStatus(businessKnowledge as any, ["companyName", "mainValueProposition", "approvedPositioningStatement"])}</p>
                     <p className="text-xs text-slate-500">Last updated: {businessKnowledge.lastUpdated ? new Date(businessKnowledge.lastUpdated).toLocaleString() : "Not saved yet"}</p>
                   </div>
-                  <button onClick={saveBusinessKnowledge} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><Save className="h-4 w-4" /> Save Business Knowledge</button>
+                  <div className="flex gap-2">
+                    <button onClick={saveBusinessKnowledge} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"><Save className="h-4 w-4" /> Save Draft</button>
+                    <button onClick={approveBusinessKnowledge} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><ShieldCheck className="h-4 w-4" /> Approve / Activate</button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {BUSINESS_KNOWLEDGE_FIELDS.map(([key, label]) => (
@@ -674,21 +818,42 @@ export default function BrainCenterPage() {
                 <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <p className="text-sm font-bold text-slate-900">Upload App Mindset</p>
-                      <p className="text-xs text-slate-500">Import `.csv`, `.txt`, or `.md`. Use key/value lines like Tone Principles: professional and practical.</p>
+                      <p className="text-sm font-bold text-slate-900">Extract From File</p>
+                      <p className="text-xs text-slate-500">Upload writing rules, brand standards, QA rules, or messaging docs for review before saving.</p>
                     </div>
-                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                      <Download className="h-4 w-4" /> Upload File
-                      <input type="file" accept=".csv,.txt,.md" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) importAppMindsetFile(file); e.currentTarget.value = ""; }} />
-                    </label>
+                    <div className="flex gap-2">
+                      <select value={extractionTarget} onChange={(e) => setExtractionTarget(e.target.value as ExtractionTarget)} className="rounded-lg border-slate-200 text-sm font-semibold">
+                        {["Auto-detect", "Business Knowledge", "App Mindset", "Offer Library", "Campaign Playbook"].map((target) => <option key={target} value={target}>{target}</option>)}
+                      </select>
+                      <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                        <Download className="h-4 w-4" /> {isExtracting ? "Extracting..." : "Upload File"}
+                        <input type="file" accept=".pdf,.docx,.txt,.csv,.xlsx,.md" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) extractFromFile(file, "App Mindset"); e.currentTarget.value = ""; }} />
+                      </label>
+                    </div>
                   </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  {[
+                    ["Completion", `${completionScore(appMindset as any, APP_MINDSET_FIELDS)}%`],
+                    ["Status", appMindset.status || "Draft"],
+                    ["Approved By", appMindset.approvedBy || "Not approved"],
+                    ["Missing", missingFields(appMindset as any, APP_MINDSET_FIELDS).slice(0, 3).join(", ") || "None"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-xl border border-slate-200 bg-white p-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">{value}</p>
+                    </div>
+                  ))}
                 </div>
                 <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
                   <div>
                     <p className="text-sm font-bold text-slate-900">Status: {contextStatus(appMindset as any, ["primaryGoal", "emailPhilosophy", "qualityThreshold"])}</p>
                     <p className="text-xs text-slate-500">Last updated: {appMindset.lastUpdated ? new Date(appMindset.lastUpdated).toLocaleString() : "Default mindset active"}</p>
                   </div>
-                  <button onClick={saveAppMindset} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><Save className="h-4 w-4" /> Save App Mindset</button>
+                  <div className="flex gap-2">
+                    <button onClick={saveAppMindset} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"><Save className="h-4 w-4" /> Save Draft</button>
+                    <button onClick={approveAppMindset} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><ShieldCheck className="h-4 w-4" /> Approve / Activate</button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {APP_MINDSET_FIELDS.map(([key, label]) => (
@@ -713,13 +878,18 @@ export default function BrainCenterPage() {
                 <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <p className="text-sm font-bold text-slate-900">Upload Offer Library</p>
-                      <p className="text-xs text-slate-500">Import a `.csv` with one offer per row. Headers can match Offer Name, Description, CTA Options, Banned Claims, Status, and related fields.</p>
+                      <p className="text-sm font-bold text-slate-900">Extract From File</p>
+                      <p className="text-xs text-slate-500">Upload offer sheets, pricing notes, sales enablement docs, or CSV offer rows for review before activation.</p>
                     </div>
-                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                      <Download className="h-4 w-4" /> Upload CSV
-                      <input type="file" accept=".csv" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) importOfferLibraryFile(file); e.currentTarget.value = ""; }} />
-                    </label>
+                    <div className="flex gap-2">
+                      <select value={extractionTarget} onChange={(e) => setExtractionTarget(e.target.value as ExtractionTarget)} className="rounded-lg border-slate-200 text-sm font-semibold">
+                        {["Auto-detect", "Business Knowledge", "App Mindset", "Offer Library", "Campaign Playbook"].map((target) => <option key={target} value={target}>{target}</option>)}
+                      </select>
+                      <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                        <Download className="h-4 w-4" /> {isExtracting ? "Extracting..." : "Upload File"}
+                        <input type="file" accept=".pdf,.docx,.txt,.csv,.xlsx,.md" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) extractFromFile(file, "Offer Library"); e.currentTarget.value = ""; }} />
+                      </label>
+                    </div>
                   </div>
                 </div>
                 <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 md:flex-row md:items-center md:justify-between">
@@ -731,10 +901,25 @@ export default function BrainCenterPage() {
                   </div>
                   <div className="flex gap-2">
                     <button onClick={addOffer} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"><PlusCircle className="h-4 w-4" /> Add Offer</button>
-                    <button onClick={() => saveOffers()} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><Save className="h-4 w-4" /> Save Offer</button>
+                    <button onClick={saveSelectedOfferDraft} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"><Save className="h-4 w-4" /> Save Draft</button>
+                    <button onClick={activateSelectedOffer} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"><ShieldCheck className="h-4 w-4" /> Approve / Activate</button>
                   </div>
                 </div>
                 {selectedOffer && (
+                  <>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    {[
+                      ["Completion", `${completionScore(selectedOffer as any, OFFER_FIELDS)}%`],
+                      ["Status", selectedOffer.status || "Draft"],
+                      ["Approved By", selectedOffer.approvedBy || "Not approved"],
+                      ["Missing", missingFields(selectedOffer as any, OFFER_FIELDS).slice(0, 3).join(", ") || "None"],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl border border-slate-200 bg-white p-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                        <p className="mt-1 text-sm font-bold text-slate-900">{value}</p>
+                      </div>
+                    ))}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {OFFER_FIELDS.map(([key, label]) => (
                       <label key={key} className="space-y-1">
@@ -756,6 +941,8 @@ export default function BrainCenterPage() {
                       >
                         <option value="Active">Active</option>
                         <option value="Draft">Draft</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Needs Review">Needs Review</option>
                         <option value="Archived">Archived</option>
                       </select>
                     </label>
@@ -764,6 +951,7 @@ export default function BrainCenterPage() {
                       <p className="mt-1 text-sm font-bold text-slate-900">{selectedOffer.status} · Last updated {selectedOffer.lastUpdated ? new Date(selectedOffer.lastUpdated).toLocaleString() : "not saved yet"}</p>
                     </div>
                   </div>
+                  </>
                 )}
               </div>
             ) : activeTab === "Model Settings" ? (

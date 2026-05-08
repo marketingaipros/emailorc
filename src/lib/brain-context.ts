@@ -4,6 +4,7 @@ export const OFFER_LIBRARY_KEY = "emailorcOfferLibrary";
 export const MAPPING_TEMPLATES_KEY = "emailorcMappingTemplates";
 
 export type BrainStatus = "Incomplete" | "Ready";
+export type ApprovalStatus = "Draft" | "Approved" | "Needs Review";
 
 export interface BusinessKnowledge {
   companyName: string;
@@ -26,7 +27,10 @@ export interface BusinessKnowledge {
   wordsToAvoid: string;
   customerObjections: string;
   preferredCtaLanguage: string;
+  sourceDocumentsUsed: string;
   lastUpdated?: string;
+  approvedBy?: string;
+  status?: ApprovalStatus;
 }
 
 export interface AppMindset {
@@ -46,6 +50,8 @@ export interface AppMindset {
   preferredEmailFramework: string;
   outputFormatRules: string;
   lastUpdated?: string;
+  approvedBy?: string;
+  status?: ApprovalStatus;
 }
 
 export interface OfferItem {
@@ -68,8 +74,11 @@ export interface OfferItem {
   qualificationRules: string;
   redFlags: string;
   relatedCampaignPlaybooks: string;
-  status: "Active" | "Draft" | "Archived";
+  primaryObjections: string;
+  approvedObjectionResponses: string;
+  status: "Active" | "Draft" | "Approved" | "Needs Review" | "Archived";
   lastUpdated?: string;
+  approvedBy?: string;
 }
 
 export interface MappingTemplate {
@@ -115,24 +124,27 @@ export const DEFAULT_BUSINESS_KNOWLEDGE: BusinessKnowledge = {
   wordsToAvoid: "",
   customerObjections: "",
   preferredCtaLanguage: "",
+  sourceDocumentsUsed: "",
+  status: "Draft",
 };
 
 export const DEFAULT_APP_MINDSET: AppMindset = {
   primaryGoal: "Turn customer/account records into approved, client-ready upsell outreach.",
-  emailPhilosophy: "Every email should feel useful, specific, and commercially relevant. The email should not feel like a generic blast.",
+  emailPhilosophy: "Every email should be useful, specific, commercially relevant, and easy to act on.",
   salesPhilosophy: "Do not sell the product first. Sell the business outcome, risk reduction, efficiency gain, workload relief, or opportunity being missed.",
   tonePrinciples: "Professional, practical, human, confident, and low-pressure.",
-  structureRules: "Use a natural PAS-style flow: Problem, Impact, Solution, low-friction CTA.",
-  ctaPhilosophy: "Use one clear CTA only.",
-  personalizationRules: "Use only facts from the uploaded customer record, Business Knowledge, Offer Library, Campaign Playbook, and App Mindset.",
-  deliverabilityRules: "Avoid spammy language, exaggerated claims, all-caps urgency, fake scarcity, and unsupported results.",
-  qualityThreshold: "90",
-  humanApprovalRules: "No final draft can be approved unless QA score is 90/100 or higher.",
-  noInventedFactsRule: "Do not invent facts. Do not exaggerate. Do not claim guaranteed results.",
-  riskFramingRules: "Frame risk practically without fear-based pressure.",
-  bannedPhrases: "guaranteed results, replace all staff, revolutionary, limited time only",
-  preferredEmailFramework: "PAS",
-  outputFormatRules: "Return two distinct subject lines, preview text, concise body, and one CTA.",
+  structureRules: "Use a natural PAS-style flow: Problem -> Impact -> Solution -> Low-friction CTA.",
+  ctaPhilosophy: "Use one clear CTA only. Keep it low-friction.",
+  personalizationRules: "Use only verified data from the customer record, Business Knowledge, Offer Library, or approved campaign playbook.",
+  deliverabilityRules: "Avoid hype, exaggerated urgency, spam-heavy language, all caps, excessive punctuation, and multiple CTAs.",
+  qualityThreshold: "Minimum QA score: 90/100.",
+  humanApprovalRules: "Every draft must be reviewed and approved before export or send.",
+  noInventedFactsRule: "Never invent details, results, customer facts, savings, or relationship history.",
+  riskFramingRules: "Use practical risk framing: missed opportunities, manual workload, delayed follow-up, compliance exposure, operational friction.",
+  bannedPhrases: "I hope this finds you well, just checking in, exclusive offer inside, unlock more value, act now, guaranteed, free money",
+  preferredEmailFramework: "PAS: Problem -> Impact -> Solution -> CTA.",
+  outputFormatRules: "Subject Line 1, Subject Line 2, Preview Text, Email Body, CTA, Personalization Used, QA Score, Approval Status.",
+  status: "Approved",
 };
 
 export const DEFAULT_OFFERS: OfferItem[] = [
@@ -156,6 +168,8 @@ export const DEFAULT_OFFERS: OfferItem[] = [
     qualificationRules: "Has email and company/name, is not do-not-contact, has a relevant offer trigger.",
     redFlags: "Do-not-contact, no email, no business/name, unsupported claims required.",
     relatedCampaignPlaybooks: "Expansion Outreach, Renewal Save, Usage Lift",
+    primaryObjections: "Too busy, not a priority, already have a process, unsure about value.",
+    approvedObjectionResponses: "Acknowledge the concern, keep the ask small, and offer a practical example or short review.",
     status: "Active",
   },
 ];
