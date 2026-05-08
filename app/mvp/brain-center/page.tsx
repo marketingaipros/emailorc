@@ -110,6 +110,51 @@ const GPT5_OPTIONS = [
 ];
 
 type OpenRouterModelOption = { id: string; name: string; description?: string; modality?: string };
+type EmbeddingProvider = "OpenRouter" | "OpenAI" | "Local / Future" | "Disabled";
+
+const EMBEDDING_OPTIONS = [
+  {
+    provider: "OpenAI" as EmbeddingProvider,
+    displayName: "Text Embedding 3 Small",
+    modelId: "text-embedding-3-small",
+    purpose: "Low-cost knowledge search, Brain Center retrieval, document chunk search.",
+    dimensions: 1536,
+    costMode: "Economy",
+  },
+  {
+    provider: "OpenAI" as EmbeddingProvider,
+    displayName: "Text Embedding 3 Large",
+    modelId: "text-embedding-3-large",
+    purpose: "Higher-quality retrieval for approved knowledge, offers, objections, campaign playbooks, and longer documents.",
+    dimensions: 3072,
+    costMode: "Quality",
+  },
+  {
+    provider: "OpenRouter" as EmbeddingProvider,
+    displayName: "Text Embedding 3 Small",
+    modelId: "text-embedding-3-small",
+    purpose: "OpenRouter embedding diagnostic option if the current key exposes embeddings.",
+    dimensions: 1536,
+    costMode: "Economy",
+  },
+  {
+    provider: "OpenRouter" as EmbeddingProvider,
+    displayName: "Text Embedding 3 Large",
+    modelId: "text-embedding-3-large",
+    purpose: "OpenRouter higher-quality embedding diagnostic option if available.",
+    dimensions: 3072,
+    costMode: "Quality",
+  },
+  {
+    provider: "Local / Future" as EmbeddingProvider,
+    displayName: "Local Demo Embedding",
+    modelId: "local-demo-embedding",
+    purpose: "Deterministic local demo retrieval when external embedding providers are unavailable.",
+    dimensions: 256,
+    costMode: "Demo",
+  },
+];
+const EMBEDDING_SETTINGS_KEY = "emailorcEmbeddingSettings";
 
 const MODEL_MODE_ROUTING: Record<ModelMode, Record<string, string>> = {
   Economy: {
@@ -293,12 +338,22 @@ export default function BrainCenterPage() {
     const loadedAppMindset = loadJson(APP_MINDSET_KEY, DEFAULT_APP_MINDSET);
     const loadedOffers = loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS);
     const loadedDeveloperKnowledge = loadJsonArray(DEVELOPER_KNOWLEDGE_KEY, DEFAULT_DEVELOPER_KNOWLEDGE);
+    const loadedEmbeddingSettings = loadJson(EMBEDDING_SETTINGS_KEY, {
+      provider: "OpenRouter",
+      modelId: "text-embedding-3-small",
+      active: true,
+      fallbackModel: "text-embedding-3-large",
+    });
     setBusinessKnowledge(loadedBusinessKnowledge);
     setAppMindset(loadedAppMindset);
     setOffers(loadedOffers);
     setDeveloperKnowledge(loadedDeveloperKnowledge);
     setSelectedOfferId(loadedOffers[0]?.id || DEFAULT_OFFERS[0].id);
     setSelectedDeveloperKnowledgeId(loadedDeveloperKnowledge[0]?.id || DEFAULT_DEVELOPER_KNOWLEDGE[0].id);
+    setEmbeddingProvider(loadedEmbeddingSettings.provider as EmbeddingProvider);
+    setEmbeddingModelId(loadedEmbeddingSettings.modelId);
+    setEmbeddingActive(Boolean(loadedEmbeddingSettings.active));
+    setFallbackEmbeddingModel(loadedEmbeddingSettings.fallbackModel);
   }, []);
 
   // Usage & Billing Sub-tabs
@@ -335,6 +390,15 @@ export default function BrainCenterPage() {
   const [usageLogs, setUsageLogs] = useState<any[]>([]);
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [embeddingProvider, setEmbeddingProvider] = useState<EmbeddingProvider>("OpenRouter");
+  const [embeddingModelId, setEmbeddingModelId] = useState("text-embedding-3-small");
+  const [embeddingActive, setEmbeddingActive] = useState(true);
+  const [fallbackEmbeddingModel, setFallbackEmbeddingModel] = useState("text-embedding-3-large");
+  const [isTestingEmbedding, setIsTestingEmbedding] = useState(false);
+  const [embeddingLastTested, setEmbeddingLastTested] = useState<string | null>(null);
+  const [embeddingTestResult, setEmbeddingTestResult] = useState<any>(null);
+  const [isIndexingKnowledge, setIsIndexingKnowledge] = useState<string | null>(null);
+  const [embeddingIndexStatus, setEmbeddingIndexStatus] = useState<Record<string, any>>({});
 
   const environmentName = envConfig.mode === "DEMO" ? "Demo" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production";
   const orgId = typeof window !== "undefined" ? localStorage.getItem("orgId") : null;
@@ -342,6 +406,8 @@ export default function BrainCenterPage() {
   const modelOptions = openRouterModels.length
     ? openRouterModels.map((model) => ({ value: model.id, label: `${model.name || model.id} — ${model.id}` }))
     : GPT5_OPTIONS.map((option) => ({ value: option.value, label: `${option.label} — ${option.value}` }));
+  const embeddingOptions = EMBEDDING_OPTIONS.filter((option) => option.provider === embeddingProvider);
+  const selectedEmbeddingOption = embeddingOptions.find((option) => option.modelId === embeddingModelId) || EMBEDDING_OPTIONS.find((option) => option.modelId === embeddingModelId) || EMBEDDING_OPTIONS[0];
   const currentModelName = modelOptions.find((option) => option.value === chatModel)?.label?.split(" — ")[0] || chatModel;
   const testDisabledReason = !apiKeySaved
     ? keyDisabledReason || "No OpenRouter key saved"
@@ -368,6 +434,17 @@ export default function BrainCenterPage() {
     refreshApiKeyStatus();
     refreshModelSettings();
   }, []);
+
+  useEffect(() => {
+    const option = EMBEDDING_OPTIONS.find((item) => item.provider === embeddingProvider && item.modelId === embeddingModelId);
+    if (!option) {
+      const first = EMBEDDING_OPTIONS.find((item) => item.provider === embeddingProvider);
+      if (first) {
+        setEmbeddingModelId(first.modelId);
+        setFallbackEmbeddingModel(first.modelId === "text-embedding-3-small" ? "text-embedding-3-large" : "text-embedding-3-small");
+      }
+    }
+  }, [embeddingProvider, embeddingModelId]);
 
   async function refreshModelSettings() {
     try {
@@ -574,6 +651,7 @@ export default function BrainCenterPage() {
     localStorage.setItem(OFFER_LIBRARY_KEY, JSON.stringify(offers.map((offer) => offer.id === selectedOfferId ? { ...offer, lastUpdated: new Date().toISOString() } : offer)));
     localStorage.setItem(DEVELOPER_KNOWLEDGE_KEY, JSON.stringify(developerKnowledge.map((item) => item.id === selectedDeveloperKnowledgeId ? { ...item, lastUpdated: new Date().toISOString() } : item)));
     localStorage.setItem("emailorcModelSettings", JSON.stringify(models));
+    localStorage.setItem(EMBEDDING_SETTINGS_KEY, JSON.stringify({ provider: embeddingProvider, modelId: embeddingModelId, active: embeddingActive, fallbackModel: fallbackEmbeddingModel, lastUpdated: new Date().toISOString() }));
     setTimeout(() => {
       setIsSaving(false);
       notice.success("Brain Center settings saved.", "Settings saved");
@@ -656,6 +734,140 @@ export default function BrainCenterPage() {
     setDeveloperKnowledge(stamped);
     localStorage.setItem(DEVELOPER_KNOWLEDGE_KEY, JSON.stringify(stamped));
     notice.success("Developer Knowledge saved. It is technical-only and excluded from sales messaging.", "Developer Knowledge saved");
+  }
+
+  function buildKnowledgeContent(sourceType: "Business Knowledge" | "Offer Library" | "Developer Knowledge") {
+    if (sourceType === "Business Knowledge") {
+      return BUSINESS_KNOWLEDGE_FIELDS
+        .map(([key, label]) => `${label}: ${(businessKnowledge as any)[key] || ""}`)
+        .join("\n")
+        .trim();
+    }
+    if (sourceType === "Offer Library") {
+      return OFFER_FIELDS
+        .map(([key, label]) => `${label}: ${(selectedOffer as any)?.[key] || ""}`)
+        .join("\n")
+        .trim();
+    }
+    return [
+      `Title: ${selectedDeveloperKnowledge?.title || ""}`,
+      `Type: ${selectedDeveloperKnowledge?.type || ""}`,
+      `Source File: ${selectedDeveloperKnowledge?.sourceFile || ""}`,
+      `Summary: ${selectedDeveloperKnowledge?.summary || ""}`,
+      `Used For: ${selectedDeveloperKnowledge?.usedFor || ""}`,
+      `Notes: ${selectedDeveloperKnowledge?.notes || ""}`,
+    ].join("\n").trim();
+  }
+
+  function embeddingCard(id: string) {
+    const status = embeddingIndexStatus[id] || {};
+    return {
+      status: status.status || "Not indexed",
+      model: status.model_used || "None",
+      lastIndexed: status.last_indexed ? new Date(status.last_indexed).toLocaleString() : "Never",
+      chunks: status.chunks_indexed ?? 0,
+      error: status.error || "",
+    };
+  }
+
+  async function handleTestEmbedding() {
+    if (embeddingProvider === "Disabled") {
+      notice.warning("Embedding provider is disabled.", "Embedding test disabled");
+      return;
+    }
+    setIsTestingEmbedding(true);
+    setEmbeddingTestResult(null);
+    try {
+      const response = await fetch("/api/brain/test-embedding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization_id: orgId || "org_demo",
+          user_id: userId || "user_super_admin",
+          provider: embeddingProvider,
+          model_id: embeddingModelId,
+          text: "AI Voice Agent for accounting firms",
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || "Embedding test failed.");
+      setEmbeddingTestResult(data);
+      setEmbeddingLastTested(new Date().toISOString());
+      notice.success(`Embedding generated with ${data.dimensions} dimensions.`, "Embedding test passed");
+      refreshUsageLogs();
+    } catch (error: any) {
+      const message = error.message || "Embedding test failed.";
+      setEmbeddingTestResult({ success: false, error: message, credits_charged: 0, provider: embeddingProvider, model_used: embeddingModelId });
+      setEmbeddingLastTested(new Date().toISOString());
+      notice.error(message, "Embedding test failed");
+      refreshUsageLogs();
+    } finally {
+      setIsTestingEmbedding(false);
+    }
+  }
+
+  async function generateKnowledgeEmbedding(sourceType: "Business Knowledge" | "Offer Library" | "Developer Knowledge") {
+    if (embeddingProvider === "Disabled") {
+      notice.warning("Embedding provider is disabled.", "Embedding not generated");
+      return;
+    }
+    const sourceId = sourceType === "Business Knowledge"
+      ? "business-knowledge"
+      : sourceType === "Offer Library"
+        ? selectedOffer?.id || "offer-library"
+        : selectedDeveloperKnowledge?.id || "developer-knowledge";
+    const content = buildKnowledgeContent(sourceType);
+    if (!content) {
+      notice.warning("Add content before generating embeddings.", "No content to index");
+      return;
+    }
+    setIsIndexingKnowledge(sourceId);
+    setEmbeddingIndexStatus((current) => ({
+      ...current,
+      [sourceId]: { ...(current[sourceId] || {}), status: "Indexing" },
+    }));
+    try {
+      const response = await fetch("/api/brain/embed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization_id: orgId || "org_demo",
+          user_id: userId || "user_super_admin",
+          source_type: sourceType,
+          source_id: sourceId,
+          title: sourceType === "Business Knowledge" ? businessKnowledge.companyName || "Business Knowledge" : sourceType === "Offer Library" ? selectedOffer?.offerName || "Offer" : selectedDeveloperKnowledge?.title || "Developer Knowledge",
+          text: content,
+          provider: embeddingProvider,
+          embedding_model_id: embeddingModelId,
+          source_file: sourceType === "Developer Knowledge" ? selectedDeveloperKnowledge?.sourceFile : businessKnowledge.sourceDocumentsUsed,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || "Could not generate embedding.");
+      setEmbeddingIndexStatus((current) => ({
+        ...current,
+        [sourceId]: {
+          status: "Indexed",
+          model_used: data.model_used,
+          provider: data.provider,
+          dimensions: data.dimensions,
+          last_indexed: new Date().toISOString(),
+          chunks_indexed: 1,
+        },
+      }));
+      notice.success(`${sourceType} indexed for knowledge search.`, "Embedding generated");
+      refreshUsageLogs();
+    } catch (error: any) {
+      const message = error.message || "Could not generate embedding.";
+      setEmbeddingIndexStatus((current) => ({
+        ...current,
+        [sourceId]: { status: "Error", error: message, model_used: embeddingModelId, last_indexed: new Date().toISOString(), chunks_indexed: 0 },
+      }));
+      notice.error(message, "Embedding failed");
+      refreshUsageLogs();
+    } finally {
+      setIsIndexingKnowledge(null);
+    }
   }
 
   async function extractFromFile(file: File, target: ExtractionTarget = extractionTarget) {
@@ -949,6 +1161,28 @@ export default function BrainCenterPage() {
                         <p className="mt-1 text-sm font-bold text-slate-800">{selectedDeveloperKnowledge?.lastUpdated ? new Date(selectedDeveloperKnowledge.lastUpdated).toLocaleString() : "Not saved"}</p>
                       </div>
                     </div>
+                    <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                      {(() => {
+                        const details = embeddingCard(selectedDeveloperKnowledge?.id || "developer-knowledge");
+                        return (
+                          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-indigo-700">Embedding Status</p>
+                              <p className="mt-1 text-sm font-bold text-indigo-900">{details.status} · {details.model}</p>
+                              <p className="mt-1 text-xs text-indigo-700">Last indexed: {details.lastIndexed} · Chunks indexed: {details.chunks}</p>
+                              {details.error && <p className="mt-1 text-xs font-bold text-red-700">{details.error}</p>}
+                            </div>
+                            <button
+                              onClick={() => generateKnowledgeEmbedding("Developer Knowledge")}
+                              disabled={isIndexingKnowledge === selectedDeveloperKnowledge?.id}
+                              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-60"
+                            >
+                              <Database className="h-4 w-4" /> {isIndexingKnowledge === selectedDeveloperKnowledge?.id ? "Indexing..." : details.status === "Indexed" ? "Re-index" : "Generate Embeddings"}
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <label className="space-y-1">
@@ -1030,6 +1264,28 @@ export default function BrainCenterPage() {
                       <p className="mt-1 text-sm font-bold text-slate-900">{value}</p>
                     </div>
                   ))}
+                </div>
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                  {(() => {
+                    const details = embeddingCard("business-knowledge");
+                    return (
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-indigo-700">Embedding Status</p>
+                          <p className="mt-1 text-sm font-bold text-indigo-900">{details.status} · {details.model}</p>
+                          <p className="mt-1 text-xs text-indigo-700">Last indexed: {details.lastIndexed} · Chunks indexed: {details.chunks}</p>
+                          {details.error && <p className="mt-1 text-xs font-bold text-red-700">{details.error}</p>}
+                        </div>
+                        <button
+                          onClick={() => generateKnowledgeEmbedding("Business Knowledge")}
+                          disabled={isIndexingKnowledge === "business-knowledge"}
+                          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-60"
+                        >
+                          <Database className="h-4 w-4" /> {isIndexingKnowledge === "business-knowledge" ? "Indexing..." : details.status === "Indexed" ? "Re-index" : "Generate Embeddings"}
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
                   <div>
@@ -1166,6 +1422,28 @@ export default function BrainCenterPage() {
                       </div>
                     ))}
                   </div>
+                  <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                    {(() => {
+                      const details = embeddingCard(selectedOffer.id);
+                      return (
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-700">Embedding Status</p>
+                            <p className="mt-1 text-sm font-bold text-indigo-900">{details.status} · {details.model}</p>
+                            <p className="mt-1 text-xs text-indigo-700">Last indexed: {details.lastIndexed} · Chunks indexed: {details.chunks}</p>
+                            {details.error && <p className="mt-1 text-xs font-bold text-red-700">{details.error}</p>}
+                          </div>
+                          <button
+                            onClick={() => generateKnowledgeEmbedding("Offer Library")}
+                            disabled={isIndexingKnowledge === selectedOffer.id}
+                            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-60"
+                          >
+                            <Database className="h-4 w-4" /> {isIndexingKnowledge === selectedOffer.id ? "Indexing..." : details.status === "Indexed" ? "Re-index" : "Generate Embeddings"}
+                          </button>
+                        </div>
+                      );
+                    })()}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {OFFER_FIELDS.map(([key, label]) => (
                       <label key={key} className="space-y-1">
@@ -1280,6 +1558,92 @@ export default function BrainCenterPage() {
 	                  <span className="font-bold text-slate-900">Sync Models</span> only refreshes available OpenRouter model IDs. <span className="font-bold text-slate-900">Set Active Models</span> saves the selected task routing to Brain Settings.
 	                  <span className="ml-2 font-bold text-indigo-700">Last saved:</span> {modelsLastSaved ? new Date(modelsLastSaved).toLocaleString() : "Not saved in this session"}
 	                </div>
+
+                <div className="rounded-xl border border-indigo-100 bg-white p-5 shadow-sm">
+                  <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-widest text-indigo-600">Embedding Models</p>
+                      <h3 className="mt-1 text-base font-bold text-slate-900">Knowledge Search / Retrieval</h3>
+                      <p className="mt-1 text-sm text-slate-500">Embeddings power retrieval for Business Knowledge, App Mindset, Offer Library, Campaign Playbooks, Developer Knowledge, and uploaded docs.</p>
+                    </div>
+                    <button
+                      onClick={handleTestEmbedding}
+                      disabled={isTestingEmbedding || embeddingProvider === "Disabled"}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60"
+                    >
+                      <Zap className="h-4 w-4" /> {isTestingEmbedding ? "Testing..." : "Test Embedding"}
+                    </button>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Provider</span>
+                      <select
+                        value={embeddingProvider}
+                        onChange={(e) => setEmbeddingProvider(e.target.value as EmbeddingProvider)}
+                        className="w-full rounded-lg border-slate-200 text-sm font-semibold"
+                      >
+                        <option value="OpenRouter">OpenRouter</option>
+                        <option value="OpenAI">OpenAI</option>
+                        <option value="Local / Future">Local / Future</option>
+                        <option value="Disabled">Disabled</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Embedding Model</span>
+                      <select
+                        value={embeddingModelId}
+                        onChange={(e) => setEmbeddingModelId(e.target.value)}
+                        className="w-full rounded-lg border-slate-200 text-sm font-semibold"
+                        disabled={embeddingProvider === "Disabled"}
+                      >
+                        {embeddingOptions.map((option) => (
+                          <option key={`${option.provider}-${option.modelId}`} value={option.modelId}>{option.displayName} — {option.modelId}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Fallback Embedding Model</span>
+                      <select
+                        value={fallbackEmbeddingModel}
+                        onChange={(e) => setFallbackEmbeddingModel(e.target.value)}
+                        className="w-full rounded-lg border-slate-200 text-sm font-semibold"
+                        disabled={embeddingProvider === "Disabled"}
+                      >
+                        {embeddingOptions.map((option) => (
+                          <option key={`fallback-${option.provider}-${option.modelId}`} value={option.modelId}>{option.displayName}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
+                    {[
+                      ["Purpose", selectedEmbeddingOption.purpose],
+                      ["Dimensions", String(selectedEmbeddingOption.dimensions)],
+                      ["Cost Mode", selectedEmbeddingOption.costMode],
+                      ["Active", embeddingActive ? "Yes" : "No"],
+                      ["Last Tested", embeddingLastTested ? new Date(embeddingLastTested).toLocaleString() : "Never"],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                        <p className="mt-1 text-xs font-bold text-slate-800">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+                      <input type="checkbox" checked={embeddingActive} onChange={(e) => setEmbeddingActive(e.target.checked)} className="rounded border-slate-300 text-indigo-600" />
+                      Active for Brain retrieval
+                    </label>
+                    <div className={`rounded-xl border px-4 py-3 text-sm font-bold ${embeddingTestResult?.success ? "border-emerald-200 bg-emerald-50 text-emerald-800" : embeddingTestResult ? "border-red-200 bg-red-50 text-red-800" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+                      Status: {embeddingTestResult?.success ? "Success" : embeddingTestResult ? "Error" : "Not tested"} · Model: {embeddingTestResult?.model_used || embeddingModelId}
+                      {embeddingTestResult?.dimensions ? ` · ${embeddingTestResult.dimensions} dimensions` : ""}
+                      {embeddingTestResult?.error ? ` · ${embeddingTestResult.error}` : ""}
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500">
+                    OpenRouter embedding support is provider-dependent. Use Test Embedding to confirm whether this key can call embeddings; direct OpenAI requires a server-side OPENAI_API_KEY.
+                  </p>
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {models.map((model) => (
