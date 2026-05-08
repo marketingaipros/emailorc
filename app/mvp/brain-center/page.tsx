@@ -323,6 +323,7 @@ export default function BrainCenterPage() {
   const [modelsCount, setModelsCount] = useState(0);
   const [selectedModelAvailable, setSelectedModelAvailable] = useState<boolean | null>(null);
   const [lastApiError, setLastApiError] = useState("");
+  const [lastApiDiagnostics, setLastApiDiagnostics] = useState<any>(null);
 
   const [chatModel, setChatModel] = useState(MODEL_MODE_ROUTING.Balanced.scribe);
   const [chatTask, setChatTask] = useState("General Test");
@@ -450,16 +451,19 @@ export default function BrainCenterPage() {
       const data = await response.json();
       if (data.status === "connected") {
         setConnectionStatus("Connected");
+        setLastApiError("");
         setAvailableModelsLoaded(Boolean(data.available_models_loaded));
         setModelsCount(Number(data.available_models_count || modelsCount || 0));
         setSelectedModelAvailable(Boolean(data.selected_model_available));
         setModelTested(data.model_tested || null);
         setConnectionMessage(`${data.message || "OpenRouter connection successful."} Key verified: ${data.key_verified ? "Yes" : "No"}. Live Model Response: ${data.live_model_response ? "Yes" : "No"}. Content length: ${data.content_length || 0}.`);
+        setLastApiDiagnostics(data);
         notice.success(`${data.message} Model tested: ${data.model_tested}. Live response: ${data.live_model_response ? "Yes" : "No"}.`, "OpenRouter connected");
       } else {
         setConnectionStatus("Error");
         setSelectedModelAvailable(data.selected_model_available === false ? false : selectedModelAvailable);
         setLastApiError(data.safe_error || data.message || "OpenRouter connection failed.");
+        setLastApiDiagnostics(data);
         setConnectionMessage(data.safe_error || data.message || "OpenRouter connection failed.");
         notice.error(data.safe_error || data.message || "OpenRouter connection failed.", "OpenRouter failed");
       }
@@ -469,6 +473,7 @@ export default function BrainCenterPage() {
       setConnectionStatus("Provider Unavailable");
       const message = err instanceof Error && err.name === "AbortError" ? "OpenRouter test timed out after 20 seconds." : err instanceof Error ? err.message : "OpenRouter provider unavailable.";
       setLastApiError(message);
+      setLastApiDiagnostics({ model_tested: chatModel, max_tokens_sent: 20, retry_attempted: false, content_length: 0, safe_error: message });
       setConnectionMessage(message);
       notice.error(message, "OpenRouter failed");
     } finally {
@@ -1727,6 +1732,9 @@ export default function BrainCenterPage() {
                       ["Response Time", `${lastChatResult.response_time_ms}ms`],
                       ["Credits Charged", lastChatResult.credits_charged],
                       ["Content Length", lastChatResult.content_length || 0],
+                      ["Finish Reason", lastChatResult.finish_reason || "n/a"],
+                      ["Max Tokens Sent", lastChatResult.max_tokens_sent || "n/a"],
+                      ["Retry Attempted", lastChatResult.retry_attempted ? "Yes" : "No"],
                       ["Usage Log ID", lastChatResult.usage_log_id || "Not logged"],
                       ["Tokens", `${lastChatResult.prompt_tokens || 0} / ${lastChatResult.completion_tokens || 0}`],
                     ].map(([label, value]) => (
@@ -1866,6 +1874,26 @@ export default function BrainCenterPage() {
                               <span className="text-slate-500">Last Error:</span>
                               <span className="max-w-[220px] text-right font-bold text-red-600">{lastApiError}</span>
                             </div>
+                          )}
+                          {lastApiDiagnostics && (
+                            <>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-500">Max Tokens Sent:</span>
+                                <span className="font-bold text-slate-700">{lastApiDiagnostics.max_tokens_sent || "n/a"}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-500">Finish Reason:</span>
+                                <span className="font-bold text-slate-700">{lastApiDiagnostics.finish_reason || "n/a"}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-500">Retry Attempted:</span>
+                                <span className="font-bold text-slate-700">{lastApiDiagnostics.retry_attempted ? "Yes" : "No"}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-500">Choices Count:</span>
+                                <span className="font-bold text-slate-700">{lastApiDiagnostics.choices_count ?? "n/a"}</span>
+                              </div>
+                            </>
                           )}
                         </div>
                       </div>

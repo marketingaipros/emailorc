@@ -5,6 +5,7 @@ import {
   logBrainUsage,
   normalizeMode,
   OPENROUTER_CHAT_ENDPOINT,
+  OPENROUTER_TOKEN_DEFAULTS,
   pickModel,
   safeErrorMessage,
   sendOpenRouterChat,
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
       model: selectedModel,
       prompt: "Reply with exactly: connected",
       systemPrompt: "",
-      maxTokens: 24,
+      maxTokens: OPENROUTER_TOKEN_DEFAULTS.test_connection,
       timeoutMs: 20000,
     });
 
@@ -96,6 +97,10 @@ export async function POST(request: Request) {
       content_length: chatResult.contentLength,
       response_status: chatResult.rawStatus,
       finish_reason: chatResult.finishReason,
+      max_tokens_sent: chatResult.maxTokensSent,
+      retry_attempted: chatResult.retryAttempted,
+      retry_max_tokens: chatResult.retryMaxTokens,
+      choices_count: chatResult.choicesCount,
       endpoint: OPENROUTER_CHAT_ENDPOINT,
       usage_log_id: usageLogId,
       credits_charged: 0,
@@ -105,6 +110,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const safeError = safeErrorMessage(error);
     const emptyResponse = /empty model response|did not include choices|no usable/i.test(safeError);
+    const outputLimitTooLow = /output_limit_too_low|finish reason: length/i.test(safeError);
     const usageLogId = await logBrainUsage({
       orgId,
       userId,
@@ -131,10 +137,14 @@ export async function POST(request: Request) {
       environment,
       model_mode: modelMode,
       model_tested: selectedModel,
-      message: emptyResponse ? "OpenRouter connected, but selected model returned no usable response." : "Invalid API key, unavailable model, or provider error.",
+      message: outputLimitTooLow ? "Model returned no usable content after retry. Check model output token settings." : emptyResponse ? "OpenRouter connected, but selected model returned no usable response." : "Invalid API key, unavailable model, or provider error.",
       safe_error: safeError,
+      error_code: outputLimitTooLow ? "output_limit_too_low" : "provider_error",
       live_model_response: false,
       content_length: 0,
+      max_tokens_sent: OPENROUTER_TOKEN_DEFAULTS.test_connection,
+      retry_attempted: outputLimitTooLow,
+      retry_max_tokens: outputLimitTooLow ? 100 : null,
       selected_model_available: !/Selected model unavailable/i.test(safeError),
       endpoint: OPENROUTER_CHAT_ENDPOINT,
       usage_log_id: usageLogId,

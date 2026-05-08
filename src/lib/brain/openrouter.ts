@@ -14,6 +14,17 @@ const ALLOWED_MODELS = new Set(Object.values(MODELS_BY_MODE).flat());
 export const OPENROUTER_CHAT_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 export const OPENROUTER_KEY_ENDPOINT = "https://openrouter.ai/api/v1/key";
 export const OPENROUTER_MODELS_ENDPOINT = "https://openrouter.ai/api/v1/models";
+export const OPENROUTER_TOKEN_DEFAULTS = {
+  test_connection: 20,
+  model_test_chat: 500,
+  orc_validation: 500,
+  sentinel_strategy: 800,
+  scribe_writing: 1000,
+  lexi_qa: 1000,
+  full_email_generation: 2000,
+  knowledge_extraction: 3000,
+  chat: 500,
+} as const;
 
 export const TEST_CHAT_TASKS: Record<string, string> = {
   "General Test": "Answer clearly and briefly as a helpful business assistant.",
@@ -282,14 +293,17 @@ export async function sendOpenRouterChat(params: {
   maxTokens?: number;
   timeoutMs?: number;
 }) {
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
+  if (params.systemPrompt?.trim()) {
+    messages.push({ role: "system", content: params.systemPrompt });
+  }
+  messages.push({ role: "user", content: params.prompt });
+
   return callOpenRouterModel({
     apiKey: params.apiKey,
     model: params.model,
-    messages: [
-      { role: "system", content: params.systemPrompt || TEST_CHAT_TASKS["General Test"] },
-      { role: "user", content: params.prompt },
-    ],
-    maxTokens: params.maxTokens || 160,
+    messages,
+    maxTokens: params.maxTokens || OPENROUTER_TOKEN_DEFAULTS.chat,
     temperature: 0.3,
     purpose: "chat",
     timeoutMs: params.timeoutMs,
@@ -332,69 +346,105 @@ export async function callOpenRouterModel(params: {
   timeoutMs?: number;
 }) {
   const started = Date.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), params.timeoutMs || 30000);
-  const response = await fetch(OPENROUTER_CHAT_ENDPOINT, {
-    method: "POST",
-    signal: controller.signal,
-    headers: {
-      Authorization: `Bearer ${params.apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://emailorc-account-growth-demo.dwhitesvp.workers.dev",
-      "X-Title": "EmailORC Account Growth Command Center",
-    },
-    body: JSON.stringify({
+  const initialMaxTokens = Math.max(1, params.maxTokens || OPENROUTER_TOKEN_DEFAULTS.chat);
+
+  async function attempt(maxTokens: number, retryAttempted: boolean) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), params.timeoutMs || 30000);
+    const response = await fetch(OPENROUTER_CHAT_ENDPOINT, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://emailorc-account-growth-demo.dwhitesvp.workers.dev",
+        "X-Title": "EmailORC Account Growth Command Center",
+      },
+      body: JSON.stringify({
+        model: params.model,
+        messages: params.messages,
+        max_tokens: maxTokens,
+        temperature: params.temperature ?? 0.3,
+        stream: false,
+      }),
+    }).finally(() => clearTimeout(timeout));
+
+    const text = await response.text();
+    let data: any = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
+
+    if (!response.ok) {
+      throw new Error(data?.error?.message || `OpenRouter chat check failed (${response.status}).`);
+    }
+
+    if (data?.error?.message) {
+      throw new Error(data.error.message);
+    }
+
+    const content = parseOpenRouterContent(data);
+    const hasChoices = Array.isArray(data?.choices) && data.choices.length > 0;
+    const choicesCount = Array.isArray(data?.choices) ? data.choices.length : 0;
+    const contentLength = content.length;
+    const finishReason = data?.choices?.[0]?.finish_reason || data?.choices?.[0]?.finishReason || null;
+
+    console.info("OpenRouter call", {
+      provider: "OpenRouter",
       model: params.model,
-      messages: params.messages,
-      max_tokens: params.maxTokens || 160,
-      temperature: params.temperature ?? 0.3,
-    }),
-  }).finally(() => clearTimeout(timeout));
+      endpoint: OPENROUTER_CHAT_ENDPOINT,
+      status: response.status,
+      hasChoices,
+      choicesCount,
+      contentLength,
+      finishReason,
+      maxTokens,
+      retryAttempted,
+      latencyMs: Date.now() - started,
+      purpose: params.purpose || "unknown",
+    });
 
-  const text = await response.text();
-  let data: any = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { raw: text };
+    return {
+      content,
+      data,
+      usage: data?.usage || {},
+      rawStatus: response.status,
+      hasChoices,
+      choicesCount,
+      contentLength,
+      finishReason,
+      maxTokensSent: maxTokens,
+      retryAttempted,
+    };
   }
 
-  if (!response.ok) {
-    throw new Error(data?.error?.message || `OpenRouter chat check failed (${response.status}).`);
+  let result = await attempt(initialMaxTokens, false);
+  const retryableLength = result.finishReason === "length" && result.contentLength < 3;
+  if (retryableLength) {
+    result = await attempt(Math.max(initialMaxTokens * 4, 100), true);
   }
 
-  if (data?.error?.message) {
-    throw new Error(data.error.message);
-  }
-
-  const content = parseOpenRouterContent(data);
-  const hasChoices = Array.isArray(data?.choices) && data.choices.length > 0;
-  const contentLength = content.length;
-  const finishReason = data?.choices?.[0]?.finish_reason || data?.choices?.[0]?.finishReason || null;
-
-  console.info("OpenRouter call", {
-    provider: "OpenRouter",
-    model: params.model,
-    endpoint: OPENROUTER_CHAT_ENDPOINT,
-    status: response.status,
-    hasChoices,
-    contentLength,
-    latencyMs: Date.now() - started,
-    purpose: params.purpose || "unknown",
-  });
-
-  if (!content) {
-    throw new Error(hasChoices ? `OpenRouter returned an empty model response. HTTP ${response.status}; choices: yes; content length: 0; finish reason: ${finishReason || "unknown"}.` : `OpenRouter response did not include choices. HTTP ${response.status}; choices: no; content length: 0.`);
+  if (!result.content) {
+    const base = result.hasChoices
+      ? `Model returned no usable content after retry. Check model output token settings. HTTP ${result.rawStatus}; choices: yes; choices count: ${result.choicesCount}; content length: 0; finish reason: ${result.finishReason || "unknown"}; max_tokens sent: ${result.maxTokensSent}; retry attempted: ${result.retryAttempted ? "yes" : "no"}.`
+      : `OpenRouter response did not include choices. HTTP ${result.rawStatus}; choices: no; content length: 0; max_tokens sent: ${result.maxTokensSent}.`;
+    throw new Error(result.finishReason === "length" ? `output_limit_too_low: ${base}` : base);
   }
 
   return {
-    content,
-    usage: data?.usage || {},
+    content: result.content,
+    usage: result.usage,
     responseTimeMs: Date.now() - started,
-    rawStatus: response.status,
-    hasChoices,
-    contentLength,
-    finishReason,
+    rawStatus: result.rawStatus,
+    hasChoices: result.hasChoices,
+    choicesCount: result.choicesCount,
+    contentLength: result.contentLength,
+    finishReason: result.finishReason,
+    maxTokensSent: result.maxTokensSent,
+    retryAttempted: result.retryAttempted,
+    retryMaxTokens: result.retryAttempted ? result.maxTokensSent : null,
     endpoint: OPENROUTER_CHAT_ENDPOINT,
   };
 }
