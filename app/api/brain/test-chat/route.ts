@@ -22,7 +22,6 @@ export async function POST(request: Request) {
   const prompt = String(body.prompt || "").trim();
   const orgId = body.org_id || null;
   const userId = body.user_id || null;
-  const creditsCharged = 1;
 
   if (provider !== "OpenRouter") {
     return NextResponse.json({ status: "error", message: "Only OpenRouter is supported right now." }, { status: 400 });
@@ -48,6 +47,10 @@ export async function POST(request: Request) {
 
     const promptTokens = result.usage?.prompt_tokens ?? null;
     const completionTokens = result.usage?.completion_tokens ?? null;
+    const creditsCharged = result.content.trim() ? 1 : 0;
+    if (!result.content.trim()) {
+      throw new Error("OpenRouter returned an empty model response.");
+    }
 
     await logBrainUsage({
       orgId,
@@ -71,6 +74,8 @@ export async function POST(request: Request) {
       model_mode: modelMode,
       task,
       response: result.content,
+      live_model_response: true,
+      status_label: "Success",
       response_time_ms: result.responseTimeMs,
       prompt_tokens: promptTokens,
       completion_tokens: completionTokens,
@@ -103,6 +108,9 @@ export async function POST(request: Request) {
       provider,
       model_used: model,
       model_mode: modelMode,
+      live_model_response: false,
+      status_label: "Failed",
+      credits_charged: 0,
       message: "Model test chat failed.",
       safe_error: safeError,
     }, { status: 502 });

@@ -162,8 +162,56 @@ export async function sendOpenRouterChat(params: {
   systemPrompt?: string;
   maxTokens?: number;
 }) {
+  return callOpenRouterModel({
+    apiKey: params.apiKey,
+    model: params.model,
+    messages: [
+      { role: "system", content: params.systemPrompt || TEST_CHAT_TASKS["General Test"] },
+      { role: "user", content: params.prompt },
+    ],
+    maxTokens: params.maxTokens || 160,
+    temperature: 0.3,
+    purpose: "chat",
+  });
+}
+
+function extractTextPart(part: any): string {
+  if (!part) return "";
+  if (typeof part === "string") return part;
+  if (typeof part.text === "string") return part.text;
+  if (typeof part.content === "string") return part.content;
+  if (Array.isArray(part.content)) return part.content.map(extractTextPart).join("");
+  return "";
+}
+
+export function parseOpenRouterContent(data: any) {
+  const candidates = [
+    data?.choices?.[0]?.message?.content,
+    data?.choices?.[0]?.text,
+    data?.output_text,
+    data?.message?.content,
+    data?.content,
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = Array.isArray(candidate) ? candidate.map(extractTextPart).join("") : extractTextPart(candidate);
+    if (parsed.trim()) return parsed.trim();
+  }
+
+  return "";
+}
+
+export async function callOpenRouterModel(params: {
+  apiKey: string;
+  model: string;
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  temperature?: number;
+  maxTokens?: number;
+  purpose?: string;
+}) {
   const started = Date.now();
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const endpoint = "https://openrouter.ai/api/v1/chat/completions";
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${params.apiKey}`,
@@ -173,12 +221,9 @@ export async function sendOpenRouterChat(params: {
     },
     body: JSON.stringify({
       model: params.model,
-      messages: [
-        { role: "system", content: params.systemPrompt || TEST_CHAT_TASKS["General Test"] },
-        { role: "user", content: params.prompt },
-      ],
+      messages: params.messages,
       max_tokens: params.maxTokens || 160,
-      temperature: 0.3,
+      temperature: params.temperature ?? 0.3,
     }),
   });
 
@@ -194,10 +239,36 @@ export async function sendOpenRouterChat(params: {
     throw new Error(data?.error?.message || `OpenRouter chat check failed (${response.status}).`);
   }
 
+  if (data?.error?.message) {
+    throw new Error(data.error.message);
+  }
+
+  const content = parseOpenRouterContent(data);
+  const hasChoices = Array.isArray(data?.choices) && data.choices.length > 0;
+  const contentLength = content.length;
+
+  console.info("OpenRouter call", {
+    provider: "OpenRouter",
+    model: params.model,
+    endpoint,
+    status: response.status,
+    hasChoices,
+    contentLength,
+    latencyMs: Date.now() - started,
+    purpose: params.purpose || "unknown",
+  });
+
+  if (!content) {
+    throw new Error(hasChoices ? "OpenRouter returned an empty model response." : "OpenRouter response did not include choices.");
+  }
+
   return {
-    content: data?.choices?.[0]?.message?.content || "",
+    content,
     usage: data?.usage || {},
     responseTimeMs: Date.now() - started,
+    rawStatus: response.status,
+    hasChoices,
+    contentLength,
   };
 }
 

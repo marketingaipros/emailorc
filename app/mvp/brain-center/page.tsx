@@ -390,7 +390,7 @@ export default function BrainCenterPage() {
         setAvailableModelsLoaded(Boolean(data.available_models_loaded));
         setModelTested(data.model_tested || null);
         setConnectionMessage(data.message || "OpenRouter connection successful.");
-        notice.success(`${data.message} Model tested: ${data.model_tested}.`, "OpenRouter connected");
+        notice.success(`${data.message} Model tested: ${data.model_tested}. Live response: ${data.live_model_response ? "Yes" : "No"}.`, "OpenRouter connected");
       } else {
         setConnectionStatus("Error");
         setConnectionMessage(data.safe_error || data.message || "OpenRouter connection failed.");
@@ -622,17 +622,19 @@ export default function BrainCenterPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.safe_error || data.message || "Model test chat failed.");
+      if (!data.response?.trim()) throw new Error("OpenRouter returned an empty model response.");
       setLastChatResult(data);
       setChatMessages((current) => [...current, {
         role: "assistant",
-        content: data.response || "No model response returned.",
-        meta: `${data.provider} / ${data.model_used} / ${data.response_time_ms}ms / ${data.credits_charged} credit`,
+        content: data.response,
+        meta: `${data.status_label || "Success"} / ${data.provider} / ${data.model_used} / ${data.response_time_ms}ms / ${data.credits_charged} credit / Live response: ${data.live_model_response ? "Yes" : "No"}`,
       }]);
       notice.success("Model Test Chat completed and usage was logged.", "Brain test passed");
       refreshUsageLogs();
     } catch (error: any) {
       const message = error.message || "Model Test Chat failed.";
-      setChatMessages((current) => [...current, { role: "assistant", content: message, meta: "Error" }]);
+      setLastChatResult({ status_label: "Failed", live_model_response: false, credits_charged: 0, safe_error: message, model_used: chatModel });
+      setChatMessages((current) => [...current, { role: "assistant", content: message, meta: "Failed / 0 credits / Live response: No" }]);
       notice.error(message, "Brain test failed");
       refreshUsageLogs();
     } finally {
@@ -1521,6 +1523,8 @@ export default function BrainCenterPage() {
                 {lastChatResult && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
+                      ["Status", lastChatResult.status_label || (lastChatResult.safe_error ? "Failed" : "Success")],
+                      ["Live Model Response", lastChatResult.live_model_response ? "Yes" : "No"],
                       ["Model Used", lastChatResult.model_used],
                       ["Response Time", `${lastChatResult.response_time_ms}ms`],
                       ["Credits Charged", lastChatResult.credits_charged],

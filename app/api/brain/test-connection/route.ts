@@ -46,10 +46,14 @@ export async function POST(request: Request) {
     const chatResult = await sendOpenRouterChat({
       apiKey: key,
       model: selectedModel,
-      prompt: "Reply with exactly: EmailORC connection ok",
+      prompt: "Reply with the word connected.",
       systemPrompt: "You are validating an API connection. Keep the response short.",
       maxTokens: 24,
     });
+
+    if (!/connected/i.test(chatResult.content)) {
+      throw new Error("Selected model returned output, but it did not pass the connection verification prompt.");
+    }
 
     await logBrainUsage({
       orgId,
@@ -74,6 +78,9 @@ export async function POST(request: Request) {
       model_tested: selectedModel,
       model_key_source: source,
       available_models_loaded: availableModels.length > 0,
+      live_model_response: true,
+      response_preview: chatResult.content.slice(0, 80),
+      credits_charged: 0,
       message: "OpenRouter connection successful.",
       last_tested: testedAt,
     });
@@ -103,6 +110,8 @@ export async function POST(request: Request) {
       model_tested: selectedModel,
       message: "Invalid API key, unavailable model, or provider error.",
       safe_error: safeError,
+      live_model_response: false,
+      credits_charged: 0,
       last_tested: testedAt,
     }, { status: 502 });
   }
