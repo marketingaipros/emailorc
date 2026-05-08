@@ -11,6 +11,9 @@ export const MODELS_BY_MODE: Record<ModelMode, string[]> = {
 };
 
 const ALLOWED_MODELS = new Set(Object.values(MODELS_BY_MODE).flat());
+export const OPENROUTER_CHAT_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
+export const OPENROUTER_KEY_ENDPOINT = "https://openrouter.ai/api/v1/key";
+export const OPENROUTER_MODELS_ENDPOINT = "https://openrouter.ai/api/v1/models";
 
 export const TEST_CHAT_TASKS: Record<string, string> = {
   "General Test": "Answer clearly and briefly as a helpful business assistant.",
@@ -136,8 +139,44 @@ export function maskApiKey(key: string) {
   return `${key.slice(0, 10)}••••${key.slice(-4)}`;
 }
 
+export async function verifyOpenRouterKey(apiKey: string) {
+  const response = await fetch(OPENROUTER_KEY_ENDPOINT, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    cache: "no-store",
+  });
+
+  const text = await response.text().catch(() => "");
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message || (response.status === 401 ? "OpenRouter rejected this API key." : `OpenRouter key verification failed (${response.status}).`));
+  }
+
+  const keyData = data?.data || data || {};
+  const expiresAt = keyData.expires_at || keyData.expiresAt || null;
+  if (expiresAt && Number.isFinite(Date.parse(expiresAt)) && Date.parse(expiresAt) < Date.now()) {
+    throw new Error("OpenRouter API key is expired.");
+  }
+
+  return {
+    usage: keyData.usage ?? null,
+    limit: keyData.limit ?? null,
+    limitRemaining: keyData.limit_remaining ?? keyData.limitRemaining ?? null,
+    expiresAt,
+    rawStatus: response.status,
+  };
+}
+
 export async function fetchOpenRouterModels(apiKey: string) {
-  const response = await fetch("https://openrouter.ai/api/v1/models", {
+  const response = await fetch(OPENROUTER_MODELS_ENDPOINT, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "HTTP-Referer": "https://emailorc-account-growth-demo.dwhitesvp.workers.dev",
@@ -210,8 +249,7 @@ export async function callOpenRouterModel(params: {
   purpose?: string;
 }) {
   const started = Date.now();
-  const endpoint = "https://openrouter.ai/api/v1/chat/completions";
-  const response = await fetch(endpoint, {
+  const response = await fetch(OPENROUTER_CHAT_ENDPOINT, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${params.apiKey}`,
@@ -250,7 +288,7 @@ export async function callOpenRouterModel(params: {
   console.info("OpenRouter call", {
     provider: "OpenRouter",
     model: params.model,
-    endpoint,
+    endpoint: OPENROUTER_CHAT_ENDPOINT,
     status: response.status,
     hasChoices,
     contentLength,
@@ -269,6 +307,7 @@ export async function callOpenRouterModel(params: {
     rawStatus: response.status,
     hasChoices,
     contentLength,
+    endpoint: OPENROUTER_CHAT_ENDPOINT,
   };
 }
 
@@ -278,6 +317,7 @@ export async function logBrainUsage(params: {
   action: string;
   provider: string;
   model: string;
+  modelRequested?: string;
   modelMode?: string;
   promptTokens?: number | null;
   completionTokens?: number | null;
@@ -286,37 +326,74 @@ export async function logBrainUsage(params: {
   success: boolean;
   errorMessage?: string | null;
   environment?: string;
+  endpoint?: string | null;
+  responseStatus?: number | null;
+  contentLength?: number | null;
 }) {
   const orgId = params.orgId || "org_demo";
   const userId = params.userId || "user_super_admin";
   const totalTokens = (params.promptTokens || 0) + (params.completionTokens || 0);
   const safeError = params.errorMessage ? safeErrorMessage(params.errorMessage) : null;
+  const usageId = createId("usage");
 
   const db = await getD1Database();
   if (db) {
-    await db.prepare(`
-      INSERT INTO usage_logs (
-        id, organization_id, user_id, action, model_used, credits_charged,
-        prompt_tokens, completion_tokens, total_tokens, estimated_api_cost,
-        success, error_message, environment
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      createId("usage"),
-      orgId,
-      userId,
-      `${params.action}:${params.provider}:${params.modelMode || "Balanced"}`,
-      params.model,
-      params.creditsCharged,
-      params.promptTokens || null,
-      params.completionTokens || null,
-      totalTokens || null,
-      params.estimatedApiCost || null,
-      params.success ? 1 : 0,
-      safeError,
-      params.environment || process.env.APP_ENV || "demo"
-    ).run();
-    return;
+    const action = `${params.action}:${params.provider}:${params.modelMode || "Balanced"}`;
+    const environment = params.environment || process.env.APP_ENV || "demo";
+    try {
+      await db.prepare(`
+        INSERT INTO usage_logs (
+          id, organization_id, user_id, action, model_used, model_requested, provider,
+          endpoint, response_status, content_length, credits_charged,
+          prompt_tokens, completion_tokens, total_tokens, estimated_api_cost,
+          success, error_message, environment
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        usageId,
+        orgId,
+        userId,
+        action,
+        params.model,
+        params.modelRequested || params.model,
+        params.provider,
+        params.endpoint || null,
+        params.responseStatus || null,
+        params.contentLength ?? null,
+        params.creditsCharged,
+        params.promptTokens || null,
+        params.completionTokens || null,
+        totalTokens || null,
+        params.estimatedApiCost || null,
+        params.success ? 1 : 0,
+        safeError,
+        environment
+      ).run();
+    } catch {
+      await db.prepare(`
+        INSERT INTO usage_logs (
+          id, organization_id, user_id, action, model_used, credits_charged,
+          prompt_tokens, completion_tokens, total_tokens, estimated_api_cost,
+          success, error_message, environment
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        usageId,
+        orgId,
+        userId,
+        action,
+        params.model,
+        params.creditsCharged,
+        params.promptTokens || null,
+        params.completionTokens || null,
+        totalTokens || null,
+        params.estimatedApiCost || null,
+        params.success ? 1 : 0,
+        safeError,
+        environment
+      ).run();
+    }
+    return usageId;
   }
 
   try {
@@ -338,4 +415,5 @@ export async function logBrainUsage(params: {
   } catch {
     // Usage logging must not break admin diagnostics.
   }
+  return usageId;
 }

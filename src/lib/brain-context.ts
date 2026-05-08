@@ -2,6 +2,7 @@ export const BUSINESS_KNOWLEDGE_KEY = "emailorcBusinessKnowledge";
 export const APP_MINDSET_KEY = "emailorcAppMindset";
 export const OFFER_LIBRARY_KEY = "emailorcOfferLibrary";
 export const MAPPING_TEMPLATES_KEY = "emailorcMappingTemplates";
+export const DEVELOPER_KNOWLEDGE_KEY = "emailorcDeveloperKnowledge";
 
 export type BrainStatus = "Incomplete" | "Ready";
 export type ApprovalStatus = "Draft" | "Approved" | "Needs Review";
@@ -92,6 +93,19 @@ export interface MappingTemplate {
   lastUsed?: string;
 }
 
+export interface DeveloperKnowledgeItem {
+  id: string;
+  title: string;
+  type: string;
+  sourceFile: string;
+  summary: string;
+  status: "Draft" | "Approved / Active" | "Needs Review";
+  lastUpdated?: string;
+  usedFor: string;
+  notes: string;
+  active: boolean;
+}
+
 export interface AiContextUsed {
   businessKnowledgeUsed: boolean;
   appMindsetUsed: boolean;
@@ -171,6 +185,24 @@ export const DEFAULT_OFFERS: OfferItem[] = [
     primaryObjections: "Too busy, not a priority, already have a process, unsure about value.",
     approvedObjectionResponses: "Acknowledge the concern, keep the ask small, and offer a practical example or short review.",
     status: "Active",
+  },
+];
+
+export const DEFAULT_DEVELOPER_KNOWLEDGE: DeveloperKnowledgeItem[] = [
+  {
+    id: "dev-openrouter-api-guide",
+    title: "OpenRouter API Integration Guide",
+    type: "API Documentation",
+    sourceFile: [
+      "context7.com_llmstxt_openrouter_ai_llms-full_txt_llms.txt_tokens=10000.pdf",
+      "context7.com_websites_openrouter_ai_llms.txt_tokens=10000.pdf",
+    ].join(", "),
+    summary: "Technical reference for OpenRouter key verification, model list checks, chat completions, response parsing, usage diagnostics, and safe error handling. This is developer/API knowledge only and is excluded from sales email generation context.",
+    status: "Approved / Active",
+    lastUpdated: new Date().toISOString(),
+    usedFor: "OpenRouter API connection, Model Test Chat, model list sync, API key verification, response parsing, usage/credit diagnostics, error handling",
+    notes: "Use GET /api/v1/key for key checks, GET /api/v1/models for model availability, and POST /api/v1/chat/completions with choices[0].message.content parsing for live model verification.",
+    active: true,
   },
 ];
 

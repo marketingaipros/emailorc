@@ -2,12 +2,15 @@ import { NextResponse } from "next/server";
 import {
   TEST_CHAT_TASKS,
   assertModelAllowed,
+  fetchOpenRouterModels,
   getOpenRouterKey,
   logBrainUsage,
   normalizeMode,
+  OPENROUTER_CHAT_ENDPOINT,
   pickModel,
   safeErrorMessage,
   sendOpenRouterChat,
+  verifyOpenRouterKey,
 } from "@/lib/brain/openrouter";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +39,11 @@ export async function POST(request: Request) {
     if (!key) {
       throw new Error("OpenRouter API key is not configured. Save a key or set the OPENROUTER_API_KEY Cloudflare secret.");
     }
+    await verifyOpenRouterKey(key);
+    const availableModels = await fetchOpenRouterModels(key);
+    if (!availableModels.includes(model)) {
+      throw new Error("Selected model unavailable in OpenRouter. Choose another model.");
+    }
 
     const result = await sendOpenRouterChat({
       apiKey: key,
@@ -52,12 +60,13 @@ export async function POST(request: Request) {
       throw new Error("OpenRouter returned an empty model response.");
     }
 
-    await logBrainUsage({
+    const usageLogId = await logBrainUsage({
       orgId,
       userId,
       action: `MODEL_TEST_CHAT:${task}`,
       provider,
       model,
+      modelRequested: model,
       modelMode,
       promptTokens,
       completionTokens,
@@ -65,15 +74,22 @@ export async function POST(request: Request) {
       creditsCharged,
       success: true,
       environment,
+      endpoint: OPENROUTER_CHAT_ENDPOINT,
+      responseStatus: result.rawStatus,
+      contentLength: result.contentLength,
     });
 
     return NextResponse.json({
       status: "success",
       provider,
+      model_requested: model,
       model_used: model,
       model_mode: modelMode,
       task,
       response: result.content,
+      content_length: result.contentLength,
+      response_status: result.rawStatus,
+      endpoint: OPENROUTER_CHAT_ENDPOINT,
       live_model_response: true,
       status_label: "Success",
       response_time_ms: result.responseTimeMs,
@@ -83,16 +99,18 @@ export async function POST(request: Request) {
       estimated_api_cost: null,
       subscription_status: "Active",
       credits_remaining: null,
+      usage_log_id: usageLogId,
       message: "Model test chat completed.",
     });
   } catch (error) {
     const safeError = safeErrorMessage(error);
-    await logBrainUsage({
+    const usageLogId = await logBrainUsage({
       orgId,
       userId,
       action: `MODEL_TEST_CHAT:${task}`,
       provider,
       model,
+      modelRequested: model,
       modelMode,
       promptTokens: null,
       completionTokens: null,
@@ -101,16 +119,23 @@ export async function POST(request: Request) {
       success: false,
       errorMessage: safeError,
       environment,
+      endpoint: OPENROUTER_CHAT_ENDPOINT,
+      responseStatus: null,
+      contentLength: 0,
     });
 
     return NextResponse.json({
       status: "error",
       provider,
+      model_requested: model,
       model_used: model,
       model_mode: modelMode,
       live_model_response: false,
       status_label: "Failed",
       credits_charged: 0,
+      content_length: 0,
+      endpoint: OPENROUTER_CHAT_ENDPOINT,
+      usage_log_id: usageLogId,
       message: "Model test chat failed.",
       safe_error: safeError,
     }, { status: 502 });

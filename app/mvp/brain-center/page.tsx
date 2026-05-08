@@ -43,7 +43,9 @@ import {
   BUSINESS_KNOWLEDGE_KEY,
   DEFAULT_APP_MINDSET,
   DEFAULT_BUSINESS_KNOWLEDGE,
+  DEFAULT_DEVELOPER_KNOWLEDGE,
   DEFAULT_OFFERS,
+  DEVELOPER_KNOWLEDGE_KEY,
   OFFER_LIBRARY_KEY,
   contextStatus,
   loadJson,
@@ -51,6 +53,7 @@ import {
   type ApprovalStatus,
   type AppMindset,
   type BusinessKnowledge,
+  type DeveloperKnowledgeItem,
   type OfferItem,
 } from "@/lib/brain-context";
 
@@ -63,6 +66,7 @@ type Tab =
   | "Model Settings" 
   | "Learning Log" 
   | "Learn Mode"
+  | "Developer Knowledge"
   | "API Connection"
   | "Model Test Chat"
   | "Usage & Billing";
@@ -76,6 +80,7 @@ const TABS: { name: Tab; icon: React.ReactNode }[] = [
   { name: "Model Settings", icon: <Cpu className="h-4 w-4" /> },
   { name: "Learning Log", icon: <History className="h-4 w-4" /> },
   { name: "Learn Mode", icon: <GraduationCap className="h-4 w-4" /> },
+  { name: "Developer Knowledge", icon: <Database className="h-4 w-4" /> },
   { name: "API Connection", icon: <Link2 className="h-4 w-4" /> },
   { name: "Model Test Chat", icon: <MessageSquare className="h-4 w-4" /> },
   { name: "Usage & Billing", icon: <CreditCard className="h-4 w-4" /> },
@@ -256,6 +261,8 @@ export default function BrainCenterPage() {
   const [appMindset, setAppMindset] = useState<AppMindset>(DEFAULT_APP_MINDSET);
   const [offers, setOffers] = useState<OfferItem[]>(DEFAULT_OFFERS);
   const [selectedOfferId, setSelectedOfferId] = useState(DEFAULT_OFFERS[0].id);
+  const [developerKnowledge, setDeveloperKnowledge] = useState<DeveloperKnowledgeItem[]>(DEFAULT_DEVELOPER_KNOWLEDGE);
+  const [selectedDeveloperKnowledgeId, setSelectedDeveloperKnowledgeId] = useState(DEFAULT_DEVELOPER_KNOWLEDGE[0].id);
   const [extractionTarget, setExtractionTarget] = useState<ExtractionTarget>("Auto-detect");
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractionReview, setExtractionReview] = useState<{
@@ -282,10 +289,13 @@ export default function BrainCenterPage() {
     const loadedBusinessKnowledge = loadJson(BUSINESS_KNOWLEDGE_KEY, DEFAULT_BUSINESS_KNOWLEDGE);
     const loadedAppMindset = loadJson(APP_MINDSET_KEY, DEFAULT_APP_MINDSET);
     const loadedOffers = loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS);
+    const loadedDeveloperKnowledge = loadJsonArray(DEVELOPER_KNOWLEDGE_KEY, DEFAULT_DEVELOPER_KNOWLEDGE);
     setBusinessKnowledge(loadedBusinessKnowledge);
     setAppMindset(loadedAppMindset);
     setOffers(loadedOffers);
+    setDeveloperKnowledge(loadedDeveloperKnowledge);
     setSelectedOfferId(loadedOffers[0]?.id || DEFAULT_OFFERS[0].id);
+    setSelectedDeveloperKnowledgeId(loadedDeveloperKnowledge[0]?.id || DEFAULT_DEVELOPER_KNOWLEDGE[0].id);
   }, []);
 
   // Usage & Billing Sub-tabs
@@ -389,7 +399,7 @@ export default function BrainCenterPage() {
         setConnectionStatus("Connected");
         setAvailableModelsLoaded(Boolean(data.available_models_loaded));
         setModelTested(data.model_tested || null);
-        setConnectionMessage(data.message || "OpenRouter connection successful.");
+        setConnectionMessage(`${data.message || "OpenRouter connection successful."} Key verified: ${data.key_verified ? "Yes" : "No"}. Live Model Response: ${data.live_model_response ? "Yes" : "No"}. Content length: ${data.content_length || 0}.`);
         notice.success(`${data.message} Model tested: ${data.model_tested}. Live response: ${data.live_model_response ? "Yes" : "No"}.`, "OpenRouter connected");
       } else {
         setConnectionStatus("Error");
@@ -436,6 +446,7 @@ export default function BrainCenterPage() {
     localStorage.setItem(BUSINESS_KNOWLEDGE_KEY, JSON.stringify({ ...businessKnowledge, lastUpdated: new Date().toISOString() }));
     localStorage.setItem(APP_MINDSET_KEY, JSON.stringify({ ...appMindset, lastUpdated: new Date().toISOString() }));
     localStorage.setItem(OFFER_LIBRARY_KEY, JSON.stringify(offers.map((offer) => offer.id === selectedOfferId ? { ...offer, lastUpdated: new Date().toISOString() } : offer)));
+    localStorage.setItem(DEVELOPER_KNOWLEDGE_KEY, JSON.stringify(developerKnowledge.map((item) => item.id === selectedDeveloperKnowledgeId ? { ...item, lastUpdated: new Date().toISOString() } : item)));
     setTimeout(() => {
       setIsSaving(false);
       notice.success("Brain Center settings saved.", "Settings saved");
@@ -505,6 +516,20 @@ export default function BrainCenterPage() {
   }
 
   const selectedOffer = offers.find((offer) => offer.id === selectedOfferId) || offers[0];
+  const selectedDeveloperKnowledge = developerKnowledge.find((item) => item.id === selectedDeveloperKnowledgeId) || developerKnowledge[0];
+
+  function updateDeveloperKnowledge(field: keyof DeveloperKnowledgeItem, value: any) {
+    setDeveloperKnowledge((current) => current.map((item) => (
+      item.id === selectedDeveloperKnowledgeId ? { ...item, [field]: value } : item
+    )));
+  }
+
+  function saveDeveloperKnowledge() {
+    const stamped = developerKnowledge.map((item) => item.id === selectedDeveloperKnowledgeId ? { ...item, lastUpdated: new Date().toISOString() } : item);
+    setDeveloperKnowledge(stamped);
+    localStorage.setItem(DEVELOPER_KNOWLEDGE_KEY, JSON.stringify(stamped));
+    notice.success("Developer Knowledge saved. It is technical-only and excluded from sales messaging.", "Developer Knowledge saved");
+  }
 
   async function extractFromFile(file: File, target: ExtractionTarget = extractionTarget) {
     setIsExtracting(true);
@@ -627,7 +652,7 @@ export default function BrainCenterPage() {
       setChatMessages((current) => [...current, {
         role: "assistant",
         content: data.response,
-        meta: `${data.status_label || "Success"} / ${data.provider} / ${data.model_used} / ${data.response_time_ms}ms / ${data.credits_charged} credit / Live response: ${data.live_model_response ? "Yes" : "No"}`,
+        meta: `${data.status_label || "Success"} / ${data.provider} / ${data.model_used} / ${data.response_time_ms}ms / ${data.credits_charged} credit / ${data.content_length || 0} chars / Live response: ${data.live_model_response ? "Yes" : "No"}`,
       }]);
       notice.success("Model Test Chat completed and usage was logged.", "Brain test passed");
       refreshUsageLogs();
@@ -688,7 +713,8 @@ export default function BrainCenterPage() {
                 {activeTab === "Usage & Billing" && "Manage your AI Credits, subscription tier, and usage metrics."}
                 {activeTab === "API Connection" && "Configure your Brain API environment, keys, and hybrid demo fallback settings."}
                 {activeTab === "Model Test Chat" && "Run admin-only model checks before testers use the Brain API."}
-                {!["Model Settings", "Usage & Billing", "API Connection", "Model Test Chat"].includes(activeTab) && "Configure intelligence parameters for the AI generation workflow."}
+                {activeTab === "Developer Knowledge" && "Store technical API references used for integration diagnostics, not customer-facing email generation."}
+                {!["Model Settings", "Usage & Billing", "API Connection", "Model Test Chat", "Developer Knowledge"].includes(activeTab) && "Configure intelligence parameters for the AI generation workflow."}
               </p>
             </div>
             <button
@@ -751,7 +777,98 @@ export default function BrainCenterPage() {
               </div>
             )}
 
-            {activeTab === "Business Knowledge" ? (
+            {activeTab === "Developer Knowledge" ? (
+              <div className="space-y-6">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Technical Knowledge</p>
+                      <h3 className="mt-1 text-lg font-bold text-slate-900">Developer Knowledge / API Knowledge</h3>
+                      <p className="mt-1 text-sm text-slate-600">Approved integration docs for API setup, model routing, response parsing, and troubleshooting. These records are not included in customer email generation context.</p>
+                    </div>
+                    <button onClick={saveDeveloperKnowledge} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-xs font-black uppercase tracking-widest text-white">
+                      <Save className="h-4 w-4" /> Save
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6">
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+                    {developerKnowledge.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setSelectedDeveloperKnowledgeId(item.id)}
+                        className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-bold ${selectedDeveloperKnowledgeId === item.id ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
+                      >
+                        {item.title}
+                        <span className="mt-1 block text-[10px] font-black uppercase tracking-widest text-slate-400">{item.type}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Status</p>
+                        <p className="mt-1 text-sm font-bold text-emerald-800">{selectedDeveloperKnowledge?.status || "Approved / Active"}</p>
+                      </div>
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-blue-700">Active</p>
+                        <p className="mt-1 text-sm font-bold text-blue-800">{selectedDeveloperKnowledge?.active ? "Yes" : "No"}</p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Last Updated</p>
+                        <p className="mt-1 text-sm font-bold text-slate-800">{selectedDeveloperKnowledge?.lastUpdated ? new Date(selectedDeveloperKnowledge.lastUpdated).toLocaleString() : "Not saved"}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <label className="space-y-1">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Title</span>
+                        <input value={selectedDeveloperKnowledge?.title || ""} onChange={(e) => updateDeveloperKnowledge("title", e.target.value)} className="w-full rounded-lg border-slate-200 text-sm" />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Type</span>
+                        <input value={selectedDeveloperKnowledge?.type || ""} onChange={(e) => updateDeveloperKnowledge("type", e.target.value)} className="w-full rounded-lg border-slate-200 text-sm" />
+                      </label>
+                    </div>
+
+                    {[
+                      ["sourceFile", "Source File"],
+                      ["summary", "Summary"],
+                      ["usedFor", "Used For"],
+                      ["notes", "Notes"],
+                    ].map(([field, label]) => (
+                      <label key={field} className="block space-y-1">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+                        <textarea
+                          value={String(selectedDeveloperKnowledge?.[field as keyof DeveloperKnowledgeItem] || "")}
+                          onChange={(e) => updateDeveloperKnowledge(field as keyof DeveloperKnowledgeItem, e.target.value)}
+                          rows={field === "summary" ? 4 : 3}
+                          className="w-full rounded-lg border-slate-200 text-sm"
+                        />
+                      </label>
+                    ))}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <label className="space-y-1">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Status</span>
+                        <select value={selectedDeveloperKnowledge?.status || "Approved / Active"} onChange={(e) => updateDeveloperKnowledge("status", e.target.value)} className="w-full rounded-lg border-slate-200 text-sm">
+                          <option value="Draft">Draft</option>
+                          <option value="Approved / Active">Approved / Active</option>
+                          <option value="Needs Review">Needs Review</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-700">
+                        <input type="checkbox" checked={Boolean(selectedDeveloperKnowledge?.active)} onChange={(e) => updateDeveloperKnowledge("active", e.target.checked)} className="rounded border-slate-300 text-indigo-600" />
+                        Active for developer diagnostics
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : activeTab === "Business Knowledge" ? (
               <div className="space-y-6">
                 <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
                   <p className="text-xs font-bold uppercase tracking-widest text-blue-700">Brain Usage</p>
@@ -1528,6 +1645,8 @@ export default function BrainCenterPage() {
                       ["Model Used", lastChatResult.model_used],
                       ["Response Time", `${lastChatResult.response_time_ms}ms`],
                       ["Credits Charged", lastChatResult.credits_charged],
+                      ["Content Length", lastChatResult.content_length || 0],
+                      ["Usage Log ID", lastChatResult.usage_log_id || "Not logged"],
                       ["Tokens", `${lastChatResult.prompt_tokens || 0} / ${lastChatResult.completion_tokens || 0}`],
                     ].map(([label, value]) => (
                       <div key={label} className="rounded-xl border border-slate-200 bg-white p-4">
