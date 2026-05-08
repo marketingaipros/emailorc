@@ -20,8 +20,22 @@ const EXPORT_OPTIONS = [
 export default function ExportCenterPage() {
   const notice = useNotice();
   const [exported, setExported] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState<string | null>(null);
 
-  const exportFile = (id: string, format: string) => {
+  const exportFile = async (id: string, format: string) => {
+    setExporting(id);
+    const envConfig = JSON.parse(localStorage.getItem("envConfig") || "{}");
+    const environment = String(envConfig.mode || "demo").toLowerCase().replace("_", "-");
+    const apiRows = await fetch("/api/workflow/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        organization_id: localStorage.getItem("orgId") || "org_demo",
+        user_id: localStorage.getItem("userId") || "user_super_admin",
+        environment,
+        format,
+      }),
+    }).then((response) => response.json()).catch(() => ({ rows: [] }));
     const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
     const savedState = localStorage.getItem(DRAFT_STATE_KEY);
     const rows = saved ? JSON.parse(saved) : [];
@@ -39,7 +53,12 @@ export default function ExportCenterPage() {
         _status: "Approved",
       })),
     ];
-    const sourceRows = approvedRows.length ? approvedRows : [
+    const dedupedApprovedRows = Array.from(new Map(approvedRows
+      .filter((row: any) => row._status === "Approved" && !row._dnc)
+      .map((row: any) => [String(row._email || row.email || row._id || row.id).toLowerCase(), row])).values());
+    const sourceRows = apiRows.rows?.length ? apiRows.rows.map((row: any) => ({
+      _name: row.name, _company: row.company, _email: row.email, _subject: row.subject, _body: row.body, _score: row.qa_score, _status: row.status,
+    })) : dedupedApprovedRows.length ? dedupedApprovedRows : [
       { _name: "Sarah Johnson", _company: "Apex Logistics", _email: "sarah@apexlogistics.com", _subject: "Unlock Enterprise-Level Growth for Apex Logistics", _body: "Approved demo draft", _score: 94, _status: "Approved" },
       { _name: "Marcus Webb", _company: "Greenfield Capital", _email: "m.webb@greenfield.com", _subject: "See what Pro + Analytics unlocks", _body: "Approved demo draft", _score: 92, _status: "Approved" },
     ];
@@ -64,6 +83,8 @@ export default function ExportCenterPage() {
     link.click();
     URL.revokeObjectURL(url);
     setExported((p) => new Set([...p, id]));
+    setExporting(null);
+    if (apiRows.duplicate_emails_removed) notice.warning("Duplicate emails were removed from this export.", "Duplicates removed");
     notice.success(`${format} export completed.`, "Export completed");
   };
 
@@ -98,8 +119,8 @@ export default function ExportCenterPage() {
                 <div className="flex items-center justify-between mt-4">
                   <span className="text-xs text-slate-500">{opt.count} record{opt.count !== 1 ? "s" : ""}</span>
                   {!done ? (
-                    <button onClick={() => exportFile(opt.id, opt.format)} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors">
-                      <Download className="h-3.5 w-3.5" /> Export
+                    <button disabled={exporting === opt.id} onClick={() => exportFile(opt.id, opt.format)} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors disabled:opacity-60">
+                      <Download className="h-3.5 w-3.5" /> {exporting === opt.id ? "Exporting..." : "Export"}
                     </button>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 text-emerald-700 px-3 py-1.5 text-xs font-semibold">

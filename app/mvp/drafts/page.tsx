@@ -3,15 +3,16 @@
 import React, { useEffect, useState } from "react";
 import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, ShieldAlert, AlertTriangle } from "lucide-react";
 import { useNotice } from "@/components/notice/NoticeProvider";
-import type { AiContextUsed } from "@/lib/brain-context";
+import { DEFAULT_OFFERS, OFFER_LIBRARY_KEY, loadJsonArray, type AiContextUsed, type OfferItem } from "@/lib/brain-context";
 
 type ApprovalStatus = "Pending Review" | "Approved" | "Regenerate";
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
 const DRAFT_STATE_KEY = "emailorcDraftState";
 const QA_APPROVAL_THRESHOLD = 90;
+const INTERNAL_SUBJECT_WORDS = ["upsell", "campaign", "lead magnet", "strategy"];
 
 interface Draft {
-  id: number;
+  id: number | string;
   name: string;
   company: string;
   product: string;
@@ -77,12 +78,14 @@ const DEMO_DRAFTS: Draft[] = [
 export default function DraftsPage() {
   const notice = useNotice();
   const [drafts, setDrafts] = useState<Draft[]>(DEMO_DRAFTS);
-  const [activeSubject, setActiveSubject] = useState<Record<number, 1 | 2>>({});
-  const [regeneratingId, setRegeneratingId] = useState<number | null>(null);
+  const [activeSubject, setActiveSubject] = useState<Record<string, 1 | 2>>({});
+  const [regeneratingId, setRegeneratingId] = useState<number | string | null>(null);
+  const [offers, setOffers] = useState<OfferItem[]>(DEFAULT_OFFERS);
 
   function buildQaIssues(draft: Draft) {
     const issues = [...(draft.qaIssues || [])];
     if (draft.subject1.trim().toLowerCase() === draft.subject2.trim().toLowerCase()) issues.push("Duplicate subject lines");
+    if (INTERNAL_SUBJECT_WORDS.some((word) => draft.subject2.toLowerCase().includes(word))) issues.push("Subject Line 2 uses internal language");
     if (draft.qaScore < QA_APPROVAL_THRESHOLD) issues.push("QA score below threshold");
     if (draft.spamRisk === "High") issues.push("Spam risk is high");
     if (!draft.name || !draft.company || !draft.body || !draft.subject1 || !draft.subject2) issues.push("Draft missing required fields");
@@ -97,6 +100,7 @@ export default function DraftsPage() {
     if (!["SUPER_ADMIN", "CLIENT_ADMIN", "REVIEWER"].includes(role)) return "User does not have approval permission";
     if (!draft.name || !draft.company || !draft.body || !draft.subject1 || !draft.subject2) return "Draft missing required fields";
     if (draft.subject1.trim().toLowerCase() === draft.subject2.trim().toLowerCase()) return "Duplicate subject lines";
+    if (INTERNAL_SUBJECT_WORDS.some((word) => draft.subject2.toLowerCase().includes(word))) return "Subject Line 2 uses internal language";
     if (draft.aiContext?.missingContextWarnings?.some((warning) => /offer is missing/i.test(warning))) return "Required offer data is missing";
     if (draft.aiContext?.missingContextWarnings?.some((warning) => /business knowledge is incomplete/i.test(warning))) return "Required Business Knowledge is missing";
     if (draft.aiContext?.bannedClaimsFound) return "Banned claims remain";
@@ -108,7 +112,7 @@ export default function DraftsPage() {
   function persistAllDrafts(nextDrafts: Draft[]) {
     localStorage.setItem(DRAFT_STATE_KEY, JSON.stringify(Object.fromEntries(nextDrafts.map((draft) => [String(draft.id), draft]))));
     const uploaded = nextDrafts
-      .filter((draft) => draft.id >= 1000)
+      .filter((draft) => Number(draft.id) >= 1000 || typeof draft.id === "string")
       .map((draft) => ({
         _id: `draft-${draft.id}`,
         _name: draft.name,
@@ -131,6 +135,17 @@ export default function DraftsPage() {
   }
 
   useEffect(() => {
+    setOffers(loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS));
+    const envConfig = JSON.parse(localStorage.getItem("envConfig") || "{}");
+    fetch(`/api/workflow/drafts?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}&environment=${encodeURIComponent(String(envConfig.mode || "demo").toLowerCase().replace("_", "-"))}`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status === "success" && data.drafts?.length) {
+          setDrafts(data.drafts);
+        }
+      })
+      .catch(() => {});
+
     const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
     const savedState = localStorage.getItem(DRAFT_STATE_KEY);
     const stateById = savedState ? JSON.parse(savedState) : {};
@@ -176,10 +191,10 @@ export default function DraftsPage() {
     }
   }, []);
 
-  const toggle = (id: number) =>
+  const toggle = (id: number | string) =>
     setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, expanded: !d.expanded } : d)));
 
-  const approve = async (id: number) => {
+  const approve = async (id: number | string) => {
     const draft = drafts.find((item) => item.id === id);
     if (!draft) return;
     const blockReason = approvalBlockReason(draft);
@@ -215,7 +230,7 @@ export default function DraftsPage() {
     }
   };
 
-  const regenerate = async (id: number) => {
+  const regenerate = async (id: number | string) => {
     const draft = drafts.find((item) => item.id === id);
     if (!draft) return;
     setRegeneratingId(id);
@@ -253,7 +268,8 @@ export default function DraftsPage() {
     notice.info("Draft copied to clipboard.", "Copied");
   };
 
-  const subjectFor = (d: Draft) => activeSubject[d.id] === 2 ? d.subject2 : d.subject1;
+  const subjectFor = (d: Draft) => activeSubject[String(d.id)] === 2 ? d.subject2 : d.subject1;
+  const activeOffers = offers.filter((offer) => offer.status === "Active" || offer.status === "Approved");
 
   const approved = drafts.filter((d) => d.status === "Approved").length;
   const pending  = drafts.filter((d) => d.status === "Pending Review").length;
@@ -335,9 +351,9 @@ export default function DraftsPage() {
                     {[1, 2].map((n) => (
                       <button
                         key={n}
-                        onClick={() => setActiveSubject((prev) => ({ ...prev, [draft.id]: n as 1 | 2 }))}
+                        onClick={() => setActiveSubject((prev) => ({ ...prev, [String(draft.id)]: n as 1 | 2 }))}
                         className={`rounded-lg border px-4 py-2 text-sm transition-colors text-left
-                          ${(activeSubject[draft.id] ?? 1) === n
+                          ${(activeSubject[String(draft.id)] ?? 1) === n
                             ? "border-indigo-500 bg-indigo-50 text-indigo-800 font-medium"
                             : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300"}`}
                       >
@@ -391,7 +407,17 @@ export default function DraftsPage() {
                   <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Business Knowledge used</span><strong>{draft.aiContext?.businessKnowledgeUsed ? "Yes" : "No"}</strong></div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">App Mindset used</span><strong>{draft.aiContext?.appMindsetUsed ? "Yes" : "No"}</strong></div>
-                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Offer used</span><strong>{draft.aiContext?.offerUsed || draft.offerName || "Not recorded"}</strong></div>
+                    <div className="rounded-lg bg-slate-50 px-3 py-2">
+                      <span className="text-slate-500">Offer used</span>
+                      <select
+                        value={draft.offerName || draft.aiContext?.offerUsed || ""}
+                        onChange={(e) => setDrafts((prev) => prev.map((item) => item.id === draft.id ? { ...item, offerName: e.target.value, aiContext: { ...(item.aiContext || {} as any), offerUsed: e.target.value } } : item))}
+                        className="mt-1 w-full rounded-md border-slate-200 bg-white text-xs font-bold text-slate-800"
+                      >
+                        {activeOffers.length === 0 && <option value="">No active offers found. Add an offer in Brain Center - Offer Library.</option>}
+                        {activeOffers.map((offer) => <option key={offer.id} value={offer.offerName}>{offer.offerName} - {offer.offerType} - {offer.status} - {offer.targetSegment}</option>)}
+                      </select>
+                    </div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Campaign Playbook used</span><strong>{draft.aiContext?.campaignPlaybookUsed || draft.campaignPlaybook || "Not recorded"}</strong></div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Custom fields used</span><strong>{draft.aiContext?.customFieldsUsed?.join(", ") || Object.keys(draft.customFields || {}).join(", ") || "None"}</strong></div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Banned claims found</span><strong className={draft.aiContext?.bannedClaimsFound ? "text-red-600" : "text-emerald-600"}>{draft.aiContext?.bannedClaimsFound ? "Yes" : "No"}</strong></div>

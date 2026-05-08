@@ -35,12 +35,13 @@ import {
   AlertTriangle,
   Info,
   ExternalLink,
-  Cpu
+  Cpu,
+  Activity
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useNotice } from "@/components/notice/NoticeProvider";
 
-type AdminTab = "Users" | "Organizations" | "Roles & Permissions" | "Subscription Plans" | "AI Credits" | "Usage Logs" | "API Settings" | "Environment";
+type AdminTab = "Users" | "Organizations" | "Roles & Permissions" | "Subscription Plans" | "AI Credits" | "Usage Logs" | "API Settings" | "Environment" | "System Health";
 
 type EnvironmentMode = "DEMO" | "TEST_LIVE" | "PRODUCTION";
 
@@ -67,6 +68,7 @@ export default function AdminConsole() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [systemHealth, setSystemHealth] = useState<any>(null);
   
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [envConfig, setEnvConfig] = useState<EnvironmentConfig>({
@@ -125,6 +127,13 @@ export default function AdminConsole() {
     setTimeout(() => setSuccess(null), 3000);
   };
 
+  const loadSystemHealth = async () => {
+    const env = envConfig.mode.toLowerCase().replace("_", "-");
+    const response = await fetch(`/api/admin/system-health?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}&environment=${encodeURIComponent(env)}`);
+    const data = await response.json();
+    setSystemHealth(data);
+  };
+
   const handleModeSwitch = (newMode: EnvironmentMode) => {
     if (newMode === "PRODUCTION" && !isSuperAdmin) {
       setError("Only Super Admins can transition to Production Mode.");
@@ -160,6 +169,9 @@ export default function AdminConsole() {
     }
 
     saveEnvConfig({ ...envConfig, ...updates });
+    if (newMode !== "DEMO") {
+      notice.info(`You are viewing ${newMode === "TEST_LIVE" ? "Test Live" : "Production"} analytics. Demo/Test analytics are stored separately.`, "Environment data switched");
+    }
   };
 
   const confirmProductionMode = () => {
@@ -352,10 +364,11 @@ export default function AdminConsole() {
             { id: "Usage Logs", icon: Database },
             { id: "API Settings", icon: Zap },
             { id: "Environment", icon: Globe },
+            { id: "System Health", icon: Activity },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as AdminTab)}
+              onClick={() => { setActiveTab(tab.id as AdminTab); if (tab.id === "System Health") setTimeout(loadSystemHealth, 0); }}
               className={`w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold rounded-2xl transition-all border ${
                 activeTab === tab.id 
                   ? "bg-indigo-600/10 text-white border-indigo-500/20 shadow-lg" 
@@ -735,8 +748,48 @@ export default function AdminConsole() {
               </div>
             )}
 
+            {activeTab === "System Health" && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900">Database & Environment Health</h3>
+                    <p className="text-xs text-slate-500">Counts are separated by the active environment so Demo, Test Live, and Production analytics do not overwrite each other.</p>
+                  </div>
+                  <button onClick={loadSystemHealth} className="rounded-xl bg-slate-950 px-4 py-2 text-xs font-black uppercase tracking-widest text-white">Refresh</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {[
+                    ["Database connected", systemHealth?.database_connected ? "Yes" : "No"],
+                    ["Active environment", systemHealth?.active_environment || envConfig.mode],
+                    ["Last database write", systemHealth?.last_database_write || "None yet"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                      <p className="mt-2 text-sm font-black text-slate-900">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Table counts</p>
+                  <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {Object.entries(systemHealth?.counts || {}).map(([table, count]) => (
+                      <div key={table} className="rounded-xl bg-slate-50 p-4">
+                        <p className="text-xs font-bold text-slate-500">{table}</p>
+                        <p className="text-2xl font-black text-slate-900">{String(count)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {envConfig.mode !== "DEMO" && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+                    You are viewing {envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production"} analytics. Demo/Test/Production analytics are stored separately.
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Other tabs remain as placeholders for now */}
-            {activeTab !== "Users" && (
+            {activeTab !== "Users" && activeTab !== "Environment" && activeTab !== "System Health" && (
               <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-4">
                  <Settings2 className="h-12 w-12 opacity-20" />
                  <p className="font-bold text-sm italic">The {activeTab} control panel is under maintenance.</p>

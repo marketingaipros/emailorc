@@ -116,6 +116,24 @@ function persistDrafts(drafts: any[]) {
   localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
 }
 
+function currentEnvironment() {
+  try {
+    const config = JSON.parse(localStorage.getItem("envConfig") || "{}");
+    return String(config.mode || "demo").toLowerCase().replace("_", "-");
+  } catch {
+    return "demo";
+  }
+}
+
+function alternateSubject(company: string, offer?: OfferItem) {
+  const type = (offer?.offerType || "").toLowerCase();
+  const pain = (offer?.painPointsSolved || "").toLowerCase();
+  if (pain.includes("call") || pain.includes("phone")) return "A better way to cover the phones";
+  if (pain.includes("follow")) return `Better follow-up for ${company}`;
+  if (type.includes("support")) return `Less pressure on your team`;
+  return `A practical next step for ${company}`;
+}
+
 export default function UploadPage() {
   const notice = useNotice();
   const [data, setData] = useState<Record<string, any>[]>([]);
@@ -212,14 +230,14 @@ export default function UploadPage() {
     notice.info("Mapping template deleted.", "Template deleted");
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (generationBlocked) {
       notice.warning("Map Email, select an Offer, and choose a Campaign Playbook before generation.", "Import not ready");
       return;
     }
 
     setIsProcessing(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       const approvedBusinessKnowledge = businessKnowledge.status === "Approved";
       const approvedMindset = appMindset.status === "Approved";
       const activeOffer = selectedOffer?.status === "Active" || selectedOffer?.status === "Approved";
@@ -272,8 +290,9 @@ export default function UploadPage() {
           _product: product,
           _email: email,
           _dnc: contactDnc,
+          _offer_id: selectedOffer?.id,
           _subject: `${company}: practical next steps`,
-          _subject2: `A softer way to improve ${selectedOffer?.offerType?.toLowerCase() || "account"} results`,
+          _subject2: alternateSubject(company, selectedOffer),
           _preview: `${selectedOffer?.offerName || "A practical review"} for ${company}, grounded in your current account context.`,
           _body: body,
           _score: score,
@@ -290,6 +309,24 @@ export default function UploadPage() {
       });
       setResults(generated);
       persistDrafts(generated);
+      fetch("/api/workflow/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization_id: localStorage.getItem("orgId") || "org_demo",
+          user_id: localStorage.getItem("userId") || "user_super_admin",
+          environment: currentEnvironment(),
+          file_name: fileName,
+          mapping: fieldMapping,
+          offer_id: selectedOffer?.id,
+          offer_name: selectedOffer?.offerName,
+          playbook_name: selectedPlaybook,
+          records: generated,
+        }),
+      }).then(async (response) => {
+        const saved = await response.json().catch(() => ({}));
+        if (saved.status === "success") notice.info(`Saved ${saved.records_saved} records to the ${currentEnvironment()} database.`, "Database saved");
+      }).catch(() => notice.warning("Drafts were saved in this browser, but database persistence failed.", "Database warning"));
       setIsProcessing(false);
       notice.success(`${generated.length} records imported, validated, and drafted with Brain context.`, "Import complete");
     }, 900);

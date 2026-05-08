@@ -26,10 +26,21 @@ export async function POST(request: Request) {
 
     const db = await getD1Database();
     if (db) {
-      await db.prepare(`
+      await db.batch([
+      db.prepare(`
+        UPDATE drafts
+        SET approval_status = 'APPROVED', approved_by_user_id = ?, approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND organization_id = ?
+      `).bind(userId, draftId, orgId),
+      db.prepare(`
+        INSERT INTO approvals (id, organization_id, user_id, draft_id, environment, approval_status, qa_score)
+        VALUES (?, ?, ?, ?, ?, 'APPROVED', ?)
+      `).bind(createId("approval"), orgId, userId, draftId, process.env.APP_ENV || "demo", qaScore),
+      db.prepare(`
         INSERT INTO audit_log (id, actor_user_id, organization_id, action, target_type, target_id, metadata)
         VALUES (?, ?, ?, 'APPROVE_DRAFT', 'DRAFT', ?, ?)
-      `).bind(createId("audit"), userId, orgId, draftId, JSON.stringify({ qaScore, spamRisk })).run();
+      `).bind(createId("audit"), userId, orgId, draftId, JSON.stringify({ qaScore, spamRisk })),
+      ]);
     }
 
     return NextResponse.json({
