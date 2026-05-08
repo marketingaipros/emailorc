@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { createId, getD1Database } from "@/lib/cloudflare-db";
 import * as bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
+import { createInviteForD1 } from "@/lib/admin/invite-service";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +17,14 @@ export async function GET() {
           m.role,
           m.status AS membership_status,
           o.id AS org_id,
-          o.name AS org_name
+          o.name AS org_name,
+          it.invite_url
         FROM users u
         LEFT JOIN memberships m ON m.user_id = u.id
         LEFT JOIN organizations o ON o.id = m.organization_id
+        LEFT JOIN invite_tokens it ON it.user_id = u.id AND it.created_at = (
+          SELECT MAX(created_at) FROM invite_tokens WHERE user_id = u.id
+        )
         ORDER BY u.created_at DESC
       `).all();
 
@@ -41,6 +46,14 @@ export async function GET() {
         }] : [],
         org: user.org_name || "No Organization",
         role: user.role || "VIEWER",
+        phone: user.phone || "",
+        notes: user.notes || "",
+        requirePasswordReset: Boolean(user.require_password_reset),
+        inviteStatus: user.invite_status || "NOT_SENT",
+        lastInviteSent: user.invite_sent_at || null,
+        inviteExpires: user.invite_expires_at || null,
+        inviteUrl: user.invite_url || "",
+        inviteError: user.invite_error || "",
       })));
     }
 
@@ -94,6 +107,8 @@ export async function POST(request: Request) {
       lastName, 
       email, 
       jobTitle, 
+      phone,
+      notes,
       organizationId, 
       role, 
       status, 
@@ -116,7 +131,6 @@ export async function POST(request: Request) {
 
       const userId = createId("user");
       const membershipId = createId("membership");
-      const inviteId = createId("invite");
       const auditId = createId("audit");
       const passwordHash = password ? await bcrypt.hash(password, 10) : null;
       const userStatus = sendInvite ? "INVITED" : (status || "ACTIVE");
@@ -136,22 +150,29 @@ export async function POST(request: Request) {
         `).bind(auditId, userId, JSON.stringify({ email, role, organizationId })),
       ];
 
-      if (sendInvite) {
-        statements.push(db.prepare(`
-          INSERT INTO audit_log (id, action, target_type, target_id, metadata)
-          VALUES (?, 'CREATE_INVITE', 'USER', ?, ?)
-        `).bind(inviteId, userId, JSON.stringify({ email, role, organizationId, inviteToken: randomUUID() })));
-      }
-
       await db.batch(statements);
+      await db.prepare(`
+        UPDATE users
+        SET phone = ?, notes = ?, require_password_reset = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(phone || null, notes || null, requirePasswordReset ? 1 : 0, userId).run();
+      const org = await db.prepare("SELECT name FROM organizations WHERE id = ?").bind(organizationId).first();
+      const invite = sendInvite
+        ? await createInviteForD1({ db, request, userId, organizationId, organizationName: org?.name, email, firstName })
+        : null;
 
       return NextResponse.json({
+        success: true,
         id: userId,
         email,
         firstName,
         lastName,
         jobTitle,
+        phone,
+        notes,
         status: userStatus,
+        invite,
+        message: invite?.message || "User provisioned successfully.",
       });
     }
 

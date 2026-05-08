@@ -64,6 +64,7 @@ export default function AdminConsole() {
   const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [inviteResult, setInviteResult] = useState<any>(null);
   const [organizations, setOrganizations] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -217,6 +218,8 @@ export default function AdminConsole() {
     lastName: "", 
     email: "", 
     jobTitle: "",
+    phone: "",
+    notes: "",
     organizationId: "", 
     role: "EDITOR",
     status: "ACTIVE",
@@ -238,14 +241,19 @@ export default function AdminConsole() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create user");
       
-      setSuccess("User provisioned successfully.");
-      notice.success("User provisioned successfully.", "User created");
+      setInviteResult(data.invite || null);
+      setSuccess(data.message || "User provisioned successfully.");
+      if (data.invite?.email_sent) notice.success("User created and invite email sent.", "User created");
+      else if (data.invite) notice.warning("Invite link created. Email delivery is not configured yet.", "Manual invite needed");
+      else notice.success("User provisioned successfully.", "User created");
       setIsCreateUserModalOpen(false);
       setNewUser({ 
         firstName: "", 
         lastName: "", 
         email: "", 
         jobTitle: "",
+        phone: "",
+        notes: "",
         organizationId: organizations[0]?.id || "", 
         role: "EDITOR",
         status: "ACTIVE",
@@ -315,10 +323,27 @@ export default function AdminConsole() {
   };
 
   const handleAction = async (id: string, action: string) => {
-    // Placeholder for other actions like Resend Invite, Suspend, etc.
-    setSuccess(`${action} action performed.`);
+    if (action === "Resend Invite" || action === "Send Invite") {
+      try {
+        const res = await fetch(`/api/admin/users/${id}/invite`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || "Could not create invite.");
+        setInviteResult(data);
+        if (data.email_sent) notice.success("Invite email sent.", "Invite sent");
+        else notice.warning("Invite link created. Email delivery is not configured yet.", "Manual invite needed");
+        fetchData();
+      } catch (err: any) {
+        notice.error(err.message || "Could not create invite.", "Invite failed");
+      }
+      return;
+    }
     notice.info(`${action} action performed.`, "Admin action");
-    setTimeout(() => setSuccess(null), 2000);
+  };
+
+  const copyInviteLink = async (url?: string) => {
+    if (!url) return;
+    await navigator.clipboard.writeText(url);
+    notice.info("Invite link copied.", "Copied");
   };
 
   return (
@@ -351,6 +376,22 @@ export default function AdminConsole() {
           </button>
         </div>
       </div>
+
+      {inviteResult?.invite_url && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-black">{inviteResult.email_sent ? "Invite email accepted by provider." : "Invite created. Copy the invite link to send manually."}</p>
+              <p className="mt-1 break-all font-mono text-xs">{inviteResult.invite_url}</p>
+              <p className="mt-1 text-xs">Expires: {new Date(inviteResult.invite_expires_at).toLocaleString()}</p>
+              {inviteResult.safe_error && <p className="mt-1 text-xs font-bold">Email status: {inviteResult.safe_error}</p>}
+            </div>
+            <button onClick={() => copyInviteLink(inviteResult.invite_url)} className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white">
+              Copy Invite Link
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col lg:flex-row gap-8">
         {/* Navigation Sidebar */}
@@ -458,6 +499,11 @@ export default function AdminConsole() {
                                   {user.status}
                                 </span>
                              </div>
+                             <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                               Invite: {user.inviteStatus || "NOT_SENT"}
+                             </div>
+                             {user.lastInviteSent && <div className="text-[9px] text-slate-400">Sent: {new Date(user.lastInviteSent).toLocaleDateString()}</div>}
+                             {user.inviteExpires && <div className="text-[9px] text-slate-400">Expires: {new Date(user.inviteExpires).toLocaleDateString()}</div>}
                           </td>
                           <td className="px-6 py-4 text-right">
                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -475,8 +521,9 @@ export default function AdminConsole() {
                                 >
                                   <Settings2 className="h-4 w-4" />
                                 </button>
-                                {user.status === 'INVITED' && (
-                                  <button onClick={() => handleAction(user.id, "Resend Invite")} title="Resend Invite" className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"><MailPlus className="h-4 w-4" /></button>
+                                <button onClick={() => handleAction(user.id, user.status === 'INVITED' ? "Resend Invite" : "Send Invite")} title={user.status === 'INVITED' ? "Resend Invite" : "Send Invite"} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"><MailPlus className="h-4 w-4" /></button>
+                                {user.inviteUrl && (
+                                  <button onClick={() => copyInviteLink(user.inviteUrl)} title="Copy Invite Link" className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-amber-600 transition-colors"><ExternalLink className="h-4 w-4" /></button>
                                 )}
                                 <button 
                                   onClick={() => handleArchiveUser(user.id)}
@@ -1039,6 +1086,34 @@ export default function AdminConsole() {
                          type="text" className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500" 
                        />
                     </div>
+                 </div>
+                 <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-1.5">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Phone</label>
+                       <input
+                         value={selectedUser.phone || ""}
+                         onChange={(e) => setSelectedUser({...selectedUser, phone: e.target.value})}
+                         type="tel" className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                       />
+                    </div>
+                    <label className="flex items-center gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedUser.requirePasswordReset)}
+                        onChange={(e) => setSelectedUser({...selectedUser, requirePasswordReset: e.target.checked})}
+                        className="h-5 w-5 rounded-lg text-indigo-600 border-slate-300"
+                      />
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Require password reset</span>
+                    </label>
+                 </div>
+                 <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Notes</label>
+                    <textarea
+                      value={selectedUser.notes || ""}
+                      onChange={(e) => setSelectedUser({...selectedUser, notes: e.target.value})}
+                      rows={3}
+                      className="w-full bg-slate-50 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                    />
                  </div>
                  <div className="p-6 bg-slate-50 rounded-3xl flex items-center justify-between">
                     <div className="space-y-1.5 flex-1 mr-6">

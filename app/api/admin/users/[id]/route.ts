@@ -15,7 +15,9 @@ export async function PATCH(
     const { 
       firstName, 
       lastName, 
+      email,
       jobTitle, 
+      phone,
       organizationId, 
       role, 
       status, 
@@ -35,15 +37,15 @@ export async function PATCH(
       if (passwordHash) {
         await db.prepare(`
           UPDATE users
-          SET first_name = ?, last_name = ?, job_title = ?, status = ?, password_hash = ?, updated_at = CURRENT_TIMESTAMP
+          SET first_name = ?, last_name = ?, email = COALESCE(?, email), job_title = ?, phone = ?, status = ?, notes = ?, require_password_reset = ?, password_hash = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `).bind(firstName || null, lastName || null, jobTitle || null, status || "ACTIVE", passwordHash, id).run();
+        `).bind(firstName || null, lastName || null, email || null, jobTitle || null, phone || null, status || "ACTIVE", notes || null, requirePasswordReset ? 1 : 0, passwordHash, id).run();
       } else {
         await db.prepare(`
           UPDATE users
-          SET first_name = ?, last_name = ?, job_title = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+          SET first_name = ?, last_name = ?, email = COALESCE(?, email), job_title = ?, phone = ?, status = ?, notes = ?, require_password_reset = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `).bind(firstName || null, lastName || null, jobTitle || null, status || "ACTIVE", id).run();
+        `).bind(firstName || null, lastName || null, email || null, jobTitle || null, phone || null, status || "ACTIVE", notes || null, requirePasswordReset ? 1 : 0, id).run();
       }
 
       const existingMembership = await db.prepare("SELECT id, organization_id, role FROM memberships WHERE user_id = ? LIMIT 1")
@@ -68,12 +70,32 @@ export async function PATCH(
         VALUES (?, 'EDIT_USER', 'USER', ?, ?)
       `).bind(createId("audit"), id, JSON.stringify({ role, organizationId, status, notes })).run();
 
+      const updated = await db.prepare(`
+        SELECT u.*, m.role, o.id AS org_id, o.name AS org_name
+        FROM users u
+        LEFT JOIN memberships m ON m.user_id = u.id
+        LEFT JOIN organizations o ON o.id = m.organization_id
+        WHERE u.id = ?
+      `).bind(id).first();
+
       return NextResponse.json({
+        success: true,
         id,
-        firstName,
-        lastName,
-        jobTitle,
-        status,
+        user: {
+          id,
+          firstName: updated?.first_name || firstName,
+          lastName: updated?.last_name || lastName,
+          email: updated?.email || email,
+          jobTitle: updated?.job_title || jobTitle,
+          phone: updated?.phone || phone,
+          notes: updated?.notes || notes,
+          requirePasswordReset: Boolean(updated?.require_password_reset),
+          status: updated?.status || status,
+          role: updated?.role || role,
+          org: updated?.org_name,
+          memberships: updated?.org_id ? [{ orgId: updated.org_id, orgName: updated.org_name, role: updated.role }] : [],
+        },
+        message: "User updated successfully.",
       });
     }
 
