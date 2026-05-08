@@ -3,13 +3,27 @@
 import React, { useEffect, useState } from "react";
 import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, ShieldAlert, AlertTriangle } from "lucide-react";
 import { useNotice } from "@/components/notice/NoticeProvider";
-import { DEFAULT_OFFERS, OFFER_LIBRARY_KEY, loadJsonArray, type AiContextUsed, type OfferItem } from "@/lib/brain-context";
+import {
+  DEFAULT_OFFERS,
+  DEFAULT_VOICE_MEMORY,
+  LEARNING_LOG_KEY,
+  OFFER_LIBRARY_KEY,
+  VOICE_MEMORY_KEY,
+  loadJson,
+  loadJsonArray,
+  type AiContextUsed,
+  type LearningLogItem,
+  type OfferItem,
+  type VoiceMemory,
+} from "@/lib/brain-context";
 
 type ApprovalStatus = "Pending Review" | "Approved" | "Regenerate";
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
 const DRAFT_STATE_KEY = "emailorcDraftState";
 const QA_APPROVAL_THRESHOLD = 90;
 const INTERNAL_SUBJECT_WORDS = ["upsell", "campaign", "lead magnet", "strategy"];
+const FEEDBACK_REASONS = ["Too Generic", "Does Not Match Company", "Does Not Match Offer", "Wrong Pain Point", "Bad Subject Line", "Bad CTA", "Does Not Sound Human", "Too Salesy", "Too Long", "Too Vague", "Internal Language in Final Copy", "Use This Example as Style Reference", "Other"];
+const LEARNING_OPTIONS = ["Remember this style", "Avoid this phrase", "Avoid this structure", "Improve offer alignment", "Improve renewal context", "Improve company-specific language", "Make future emails more human", "Use this as a preferred example", "One-time feedback only"];
 
 interface Draft {
   id: number | string;
@@ -81,6 +95,10 @@ export default function DraftsPage() {
   const [activeSubject, setActiveSubject] = useState<Record<string, 1 | 2>>({});
   const [regeneratingId, setRegeneratingId] = useState<number | string | null>(null);
   const [offers, setOffers] = useState<OfferItem[]>(DEFAULT_OFFERS);
+  const [feedbackDraftId, setFeedbackDraftId] = useState<number | string | null>(null);
+  const [feedbackReason, setFeedbackReason] = useState(FEEDBACK_REASONS[0]);
+  const [feedbackLearning, setFeedbackLearning] = useState(LEARNING_OPTIONS[3]);
+  const [feedbackText, setFeedbackText] = useState("");
 
   function buildQaIssues(draft: Draft) {
     const issues = [...(draft.qaIssues || [])];
@@ -267,6 +285,66 @@ export default function DraftsPage() {
     navigator.clipboard.writeText(text);
     notice.info("Draft copied to clipboard.", "Copied");
   };
+
+  function saveFeedback(draft: Draft) {
+    const organizationId = localStorage.getItem("orgId") || "org_demo";
+    const userId = localStorage.getItem("userId") || "user_super_admin";
+    const item: LearningLogItem = {
+      feedback_id: `feedback-${Date.now()}`,
+      organization_id: organizationId,
+      user_id: userId,
+      source: feedbackReason === "Use This Example as Style Reference" ? "example" : "rejection",
+      related_draft_id: String(draft.id),
+      related_offer_id: draft.offerName || draft.aiContext?.offerUsed,
+      related_campaign_id: draft.campaignPlaybook || draft.aiContext?.campaignPlaybookUsed,
+      feedback_type: feedbackReason,
+      feedback_text: feedbackText.trim() || feedbackReason,
+      suggested_rule: feedbackLearning,
+      status: feedbackLearning === "One-time feedback only" ? "pending" : "active",
+      created_at: new Date().toISOString(),
+      approved_by: localStorage.getItem("userEmail") || undefined,
+    };
+    const currentLog = loadJsonArray<LearningLogItem>(LEARNING_LOG_KEY, []);
+    localStorage.setItem(LEARNING_LOG_KEY, JSON.stringify([item, ...currentLog]));
+
+    if (feedbackLearning !== "One-time feedback only") {
+      const memory = loadJson<VoiceMemory>(VOICE_MEMORY_KEY, DEFAULT_VOICE_MEMORY);
+      const text = feedbackText.trim();
+      const next: VoiceMemory = { ...memory, lastUpdated: new Date().toISOString() };
+      if (feedbackLearning === "Avoid this phrase") next.rejectedPhrases = [memory.rejectedPhrases, text || feedbackReason].filter(Boolean).join("\n");
+      if (feedbackLearning === "Avoid this structure") next.rejectedStructures = [memory.rejectedStructures, text || feedbackReason].filter(Boolean).join("\n");
+      if (feedbackLearning === "Improve offer alignment") next.offerSpecificRules = [memory.offerSpecificRules, text || `Avoid generic copy. Align ${draft.offerName || draft.aiContext?.offerUsed || "the offer"} to the customer-facing Sage product value.`].filter(Boolean).join("\n");
+      if (feedbackLearning === "Improve renewal context") next.approvedDraftPatterns = [memory.approvedDraftPatterns, "Use renewal timing as the reason to review fit, not as the thing being sold."].filter(Boolean).join("\n");
+      if (feedbackLearning === "Make future emails more human") next.approvedDraftPatterns = [memory.approvedDraftPatterns, "Use plain, natural paragraphs. Do not render internal strategy labels or metadata as final copy."].filter(Boolean).join("\n");
+      if (feedbackLearning === "Use this as a preferred example" || feedbackReason === "Use This Example as Style Reference") {
+        next.approvedExamples = [{
+          id: `example-${Date.now()}`,
+          title: `${draft.company} approved style example`,
+          type: "Preferred Style Example",
+          subjectLine1: draft.subject1,
+          subjectLine2: draft.subject2,
+          previewText: draft.previewText,
+          emailBody: draft.body,
+          cta: draft.cta,
+          instruction: "Use as style reference only. Do not copy verbatim.",
+          status: "Active",
+          offerName: draft.offerName || draft.aiContext?.offerUsed,
+          createdAt: new Date().toISOString(),
+          approvedBy: localStorage.getItem("userEmail") || undefined,
+        }, ...(memory.approvedExamples || [])];
+      }
+      localStorage.setItem(VOICE_MEMORY_KEY, JSON.stringify(next));
+    }
+
+    fetch("/api/brain/learning-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(item),
+    }).catch(() => {});
+    setFeedbackDraftId(null);
+    setFeedbackText("");
+    notice.success("Feedback saved to Learning Log and Voice Memory.", "Brain feedback saved");
+  }
 
   const subjectFor = (d: Draft) => activeSubject[String(d.id)] === 2 ? d.subject2 : d.subject1;
   const activeOffers = offers.filter((offer) => offer.status === "Active" || offer.status === "Approved");
@@ -486,6 +564,12 @@ export default function DraftsPage() {
                     >
                       <RefreshCw className={`h-4 w-4 ${regeneratingId === draft.id ? "animate-spin" : ""}`} /> {regeneratingId === draft.id ? "Regenerating..." : "Regenerate Email"}
                     </button>
+                    <button
+                      onClick={() => setFeedbackDraftId(feedbackDraftId === draft.id ? null : draft.id)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                    >
+                      Reject / Teach Brain
+                    </button>
                   </div>
 
                   {draft.status !== "Approved" ? (
@@ -507,6 +591,29 @@ export default function DraftsPage() {
                     </span>
                   )}
                 </div>
+                {feedbackDraftId === draft.id && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-xs font-black uppercase tracking-widest text-amber-700">What should the Brain learn from this?</p>
+                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <label className="space-y-1">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-amber-700">Reason</span>
+                        <select value={feedbackReason} onChange={(e) => setFeedbackReason(e.target.value)} className="w-full rounded-lg border-amber-200 text-sm">
+                          {FEEDBACK_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
+                        </select>
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-amber-700">Learn Action</span>
+                        <select value={feedbackLearning} onChange={(e) => setFeedbackLearning(e.target.value)} className="w-full rounded-lg border-amber-200 text-sm">
+                          {LEARNING_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                        </select>
+                      </label>
+                      <button onClick={() => saveFeedback(draft)} className="self-end rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-700">
+                        Save Feedback
+                      </button>
+                    </div>
+                    <textarea value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} rows={3} placeholder="Example: Stop saying Account Growth Strategy Review. For Sage 50cloud, talk about cloud access, collaboration, and fewer manual accounting steps." className="mt-3 w-full rounded-lg border-amber-200 text-sm" />
+                  </div>
+                )}
               </div>
             )}
           </div>

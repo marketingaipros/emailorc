@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createId, getD1Database } from "@/lib/cloudflare-db";
-import { DEFAULT_APP_MINDSET, DEFAULT_BUSINESS_KNOWLEDGE, DEFAULT_OFFERS } from "@/lib/brain-context";
+import { DEFAULT_APP_MINDSET, DEFAULT_BUSINESS_KNOWLEDGE, DEFAULT_OFFERS, DEFAULT_VOICE_MEMORY } from "@/lib/brain-context";
 import { generateSageRenewalDraft } from "@/lib/sage-renewal-generator";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +41,7 @@ export async function POST(request: Request) {
       existingBodies: [],
       liveModelUsed: false,
       modelName: "Sage renewal ORC/SENTINEL/SCRIBE/LEXI regeneration",
+      voiceMemory: DEFAULT_VOICE_MEMORY,
     });
 
     const updatedDraft = {

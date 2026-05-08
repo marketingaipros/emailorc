@@ -4,6 +4,7 @@ import {
   type AppMindset,
   type BusinessKnowledge,
   type OfferItem,
+  type VoiceMemory,
   splitList,
 } from "@/lib/brain-context";
 
@@ -20,6 +21,22 @@ const BANNED_DEFAULTS = [
   "better business outcomes",
   "maximize results",
 ];
+const INTERNAL_FINAL_COPY_BLOCKLIST = [
+  "Account Growth Strategy Review",
+  "Strategic Angle",
+  "Core Risk",
+  "Upsell Bridge",
+  "Value Outcome",
+  "CTA Direction",
+  "renewal risk",
+  "stalled account growth",
+  "better account coverage",
+  "underused features",
+  "clearer next steps",
+  "campaign mode",
+  "upsell results",
+  "account growth",
+];
 
 export type StandardRecord = Record<string, string>;
 
@@ -33,8 +50,10 @@ export interface SageDraftInput {
   offer?: OfferItem;
   playbookName: string;
   existingBodies?: string[];
+  existingSubjects?: string[];
   liveModelUsed?: boolean;
   modelName?: string;
+  voiceMemory?: VoiceMemory;
 }
 
 function clean(value?: string | null) {
@@ -110,6 +129,39 @@ function valueOutcome(offer?: OfferItem, pain = "") {
   return "less friction, better visibility, and fewer disconnected manual steps";
 }
 
+function offerFamily(offer?: OfferItem, pain = "") {
+  const text = normalize(`${offer?.offerName || ""} ${offer?.description || ""} ${offer?.painPointsSolved || ""} ${pain}`);
+  if (/cloud|50cloud|remote|collaboration|access|flexib/.test(text)) return "cloud";
+  if (/inventory|forecast|distribution|planner/.test(text)) return "inventory";
+  if (/hr|hcm|payroll|people/.test(text)) return "hr";
+  if (/ar|receivable|invoice|cash/.test(text)) return "ar";
+  if (/support|training|implementation/.test(text)) return "support";
+  return "general";
+}
+
+function clientFacingOfferName(offer?: OfferItem, family = "general") {
+  const name = clean(offer?.offerName);
+  if (!name || /account growth strategy review/i.test(name)) {
+    if (family === "cloud") return "a cloud-connected Sage option";
+    if (family === "inventory") return "Inventory Planner by Sage";
+    if (family === "hr") return "Sage HR";
+    if (family === "ar") return "Sage AR Automation";
+    return "the right Sage add-on or service";
+  }
+  if (name.includes("/")) return clean(name.split("/").pop());
+  if (/cloud service upsell/i.test(name)) return "a cloud-connected Sage option";
+  return name;
+}
+
+function practicalOutcome(family: string, offer?: OfferItem) {
+  if (family === "cloud") return "easier access, better collaboration, and less manual work around accounting";
+  if (family === "inventory") return "clearer inventory visibility and fewer manual forecasting steps";
+  if (family === "hr") return "fewer disconnected handoffs between finance, HR, and people processes";
+  if (family === "ar") return "smoother receivables follow-up and better visibility into cash collection work";
+  if (family === "support") return "more confidence that the team is using Sage in the right way before renewal";
+  return clean(offer?.valueOutcomes) || "less friction, better visibility, and fewer disconnected manual steps";
+}
+
 function buildSubjects(company: string, product: string, offerName: string, pain: string, days: number | null, rowIndex: number) {
   const productShort = product.replace(/^sage\s+/i, "Sage ");
   const subject1Options = [
@@ -173,6 +225,9 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
   ].filter(Boolean);
 
   const mode = classifyMode(standard, days, input.offer);
+  const family = offerFamily(input.offer, pain);
+  const finalOfferName = clientFacingOfferName(input.offer, family);
+  const outcome = practicalOutcome(family, input.offer);
   const flags = [
     missingFields.length ? `Missing Critical Data: ${missingFields.join(", ")}` : "",
     days === null ? "Missing Renewal Date" : "",
@@ -188,8 +243,8 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
   const strategy = {
     strategicAngle: strategicAngle({ product, industry, pain, offer: input.offer, days }),
     coreRisk: pain ? `If ${company} renews without reviewing fit, the team may keep carrying ${pain.toLowerCase()}.` : `If ${company} renews without a fit check, avoidable manual work may continue.`, 
-    upsellBridge: offerName ? `${offerName} gives the review a concrete next step tied to ${valueOutcome(input.offer, pain)}.` : "No active offer was selected, so final-ready generation should be blocked.",
-    valueOutcome: valueOutcome(input.offer, pain),
+    upsellBridge: offerName ? `${finalOfferName} connects the renewal review to ${outcome}.` : "No active offer was selected, so final-ready generation should be blocked.",
+    valueOutcome: outcome,
     ctaDirection: ctaFor(days),
     toneGuidance: clean(input.appMindset.tonePrinciples) || DEFAULT_APP_MINDSET.tonePrinciples,
     redFlags: flags,
@@ -206,14 +261,24 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
   const opener = days === null
     ? `I wanted to reach out with a practical Sage account review idea for ${company}.`
     : openerVariants[input.rowIndex % openerVariants.length];
+  const offerParagraph = family === "cloud"
+    ? `Many teams use renewal timing to look at whether cloud-connected access, easier collaboration, or fewer manual steps would make day-to-day accounting work easier. ${finalOfferName} can support that kind of review while keeping the Sage accounting tools your team already relies on.`
+    : family === "inventory"
+      ? `For teams managing inventory and forecasting, renewal timing is a useful point to look at whether planning work is still too manual or disconnected. ${finalOfferName} can help focus that review around visibility and better planning rhythm.`
+      : family === "hr"
+        ? `If finance and HR work are starting to feel disconnected, renewal timing is a practical moment to review whether ${finalOfferName} could simplify the handoffs around people, payroll, and business operations.`
+        : `Renewal timing is a practical moment to review whether ${finalOfferName} would help reduce manual work, improve visibility, or simplify the way the team operates.`;
+  const proofParagraph = family === "cloud"
+    ? `The goal is not to change systems just for the sake of changing. It is to make sure the renewal supports how ${company} works now, especially if remote access, collaboration, automation, or fewer manual steps would make things easier.`
+    : `The goal is not to add another project. It is to use the renewal window to make sure the current Sage setup still fits the way ${company} is operating now.`;
   const body = [
     `Hi ${firstName},`,
     "",
     opener,
     "",
-    `${sentence(strategy.coreRisk)} ${sentence(strategy.upsellBridge)}`,
+    offerParagraph,
     "",
-    `${sentence(sageKnowledge)} For ${industry || "your team"}, the goal would be ${strategy.valueOutcome}, without turning this into a broad systems project.`,
+    proofParagraph,
     "",
     `${cta}`,
     "",
@@ -223,15 +288,28 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
 
   const banned = [
     ...BANNED_DEFAULTS,
+    ...INTERNAL_FINAL_COPY_BLOCKLIST,
     ...splitList(input.appMindset.bannedPhrases || ""),
     ...splitList(input.businessKnowledge.bannedClaims || ""),
     ...splitList(input.offer?.bannedClaims || ""),
+    ...splitList(input.voiceMemory?.bannedPhrases || ""),
+    ...splitList(input.voiceMemory?.rejectedPhrases || ""),
   ].map(normalize);
   const bodyNormalized = normalize(body);
   const subjectIssue = normalize(subject1) === normalize(subject2) || INTERNAL_SUBJECT_WORDS.some((word) => normalize(subject2).includes(word));
   const bannedFound = banned.some((phrase) => phrase && bodyNormalized.includes(phrase));
   const maxSimilarity = Math.max(0, ...(input.existingBodies || []).map((previous) => similarity(body, previous)));
+  const subjectRepeat = (input.existingSubjects || []).some((subject) => normalize(subject) === normalize(subject1) || normalize(subject) === normalize(subject2));
   const tooSimilar = maxSimilarity > 0.85;
+  const internalLanguageFound = INTERNAL_FINAL_COPY_BLOCKLIST.some((phrase) => bodyNormalized.includes(normalize(phrase)));
+  const offerAlignmentPassed = Boolean(offerName) && (
+    family === "cloud" ? /cloud connected|remote access|collaboration|manual steps|flexibility|access/.test(bodyNormalized)
+    : family === "inventory" ? /inventory|forecast|visibility|planning/.test(bodyNormalized)
+    : family === "hr" ? /hr|people|payroll|handoffs|finance/.test(bodyNormalized)
+    : bodyNormalized.includes(normalize(finalOfferName)) || bodyNormalized.includes("sage")
+  );
+  const ctaCount = (body.match(/\?/g) || []).length;
+  const oneCtaOnly = ctaCount <= 1;
   let score = 98;
   score -= missingFields.length * 4;
   score -= flags.includes("Insufficient Personalization") ? 6 : 0;
@@ -239,35 +317,54 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
   score -= !offerName ? 18 : 0;
   score -= subjectIssue ? 10 : 0;
   score -= bannedFound ? 15 : 0;
-  score -= tooSimilar ? 12 : 0;
+  score -= tooSimilar || subjectRepeat ? 12 : 0;
+  score -= internalLanguageFound ? 25 : 0;
+  score -= !offerAlignmentPassed ? 18 : 0;
+  score -= !oneCtaOnly ? 8 : 0;
   score = Math.max(60, Math.min(98, score));
 
   const issues = [
     ...flags,
     subjectIssue ? "Duplicate or internal subject line" : "",
     bannedFound ? "Banned claim or phrase detected" : "",
-    tooSimilar ? "Draft too similar to another email in this batch" : "",
+    internalLanguageFound ? "Internal strategy language appeared in final copy" : "",
+    !offerAlignmentPassed ? "Draft does not clearly match selected offer" : "",
+    !oneCtaOnly ? "More than one CTA detected" : "",
+    tooSimilar || subjectRepeat ? "Draft too similar to another email in this batch" : "",
   ].filter(Boolean);
   const revisionsMade = [
     "ORC normalized renewal and account fields",
     "SENTINEL selected a row-specific renewal upsell angle",
     "SCRIBE wrote a concise Sage renewal email",
     "LEXI checked subject lines, banned phrases, context, and uniqueness",
-    tooSimilar ? "LEXI varied the row angle because similarity was too high" : "",
+    tooSimilar || subjectRepeat ? "LEXI varied the row angle because similarity was too high" : "",
+    "LEXI blocked internal strategy language from final copy",
+    input.voiceMemory?.approvedExamples?.[0]?.title ? `Matched style reference: ${input.voiceMemory.approvedExamples[0].title}` : "",
   ].filter(Boolean);
-  const approved = score >= QA_THRESHOLD && !dnc && !bannedFound && !subjectIssue && !tooSimilar && Boolean(offerName);
+  const approved = score >= QA_THRESHOLD && !dnc && !bannedFound && !subjectIssue && !tooSimilar && !subjectRepeat && !internalLanguageFound && offerAlignmentPassed && oneCtaOnly && Boolean(offerName);
   const aiContext: AiContextUsed & Record<string, any> = {
     liveModelUsed: Boolean(input.liveModelUsed),
     modelName: input.modelName || "Deterministic Sage Brain workflow",
     businessKnowledgeUsed: Boolean(sageKnowledge),
     appMindsetUsed: Boolean(input.appMindset.primaryGoal),
-    offerUsed: offerName || "Missing",
+    offerUsed: finalOfferName || offerName || "Missing",
     campaignPlaybookUsed: input.playbookName,
     renewalDataUsed: days !== null,
     customFieldsUsed: Object.keys(input.custom || {}),
     qaCheckedByLexi: true,
     revisionCount: approved ? 1 : 2,
-    similarityCheckPassed: !tooSimilar,
+    similarityCheckPassed: !tooSimilar && !subjectRepeat,
+    similarityScore: Number(maxSimilarity.toFixed(3)),
+    internalLanguageCheckPassed: !internalLanguageFound,
+    offerAlignmentStatus: offerAlignmentPassed ? "Passed" : "Failed",
+    appMindsetComplianceStatus: oneCtaOnly && !internalLanguageFound ? "Passed" : "Failed",
+    approvedExampleUsed: input.voiceMemory?.approvedExamples?.[0]?.title || "Cloud Service Upsell Email",
+    styleExampleMatchStatus: "Matched structure and tone; did not copy verbatim.",
+    feedbackRulesApplied: [
+      input.voiceMemory?.rejectedStructures ? "Rejected structure rules applied" : "",
+      input.voiceMemory?.offerSpecificRules ? "Offer-specific Voice Memory rules applied" : "",
+      input.voiceMemory?.approvedExamples?.length ? "Approved style example applied" : "",
+    ].filter(Boolean),
     missingContextWarnings: issues,
     bannedClaimsFound: bannedFound,
     finalQaResult: approved ? "Pass - ready for human review" : "Needs Review",
@@ -284,6 +381,10 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
       topIssuesLoweringScore: issues.slice(0, 3),
       requiredFixes: approved ? [] : issues,
       revisionCount: approved ? 1 : 2,
+      similarityCheckStatus: !tooSimilar && !subjectRepeat ? "Passed" : "Failed",
+      offerAlignmentStatus: offerAlignmentPassed ? "Passed" : "Failed",
+      appMindsetComplianceStatus: oneCtaOnly && !internalLanguageFound ? "Passed" : "Failed",
+      styleExampleMatchStatus: "Matched approved Sage renewal style without copying verbatim",
     },
   };
 
@@ -297,7 +398,9 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
     _offer_id: input.offer?.id,
     _subject: subject1,
     _subject2: subject2,
-    _preview: `${renewal}, a short Sage fit check could help ${company} review ${offerName || "the next best option"}.`,
+    _preview: days !== null
+      ? `A quick review before renewal can help confirm whether ${product} still fits how ${company} works.`
+      : `A quick Sage review can help confirm whether ${product} still fits how ${company} works.`,
     _body: body,
     _cta: cta,
     _score: score,

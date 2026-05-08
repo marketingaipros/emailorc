@@ -9,14 +9,17 @@ import {
   BUSINESS_KNOWLEDGE_KEY,
   DEFAULT_APP_MINDSET,
   DEFAULT_BUSINESS_KNOWLEDGE,
+  DEFAULT_VOICE_MEMORY,
   DEFAULT_OFFERS,
   MAPPING_TEMPLATES_KEY,
   OFFER_LIBRARY_KEY,
+  VOICE_MEMORY_KEY,
   type AiContextUsed,
   type AppMindset,
   type BusinessKnowledge,
   type MappingTemplate,
   type OfferItem,
+  type VoiceMemory,
   loadJson,
   loadJsonArray,
 } from "@/lib/brain-context";
@@ -142,11 +145,13 @@ export default function UploadPage() {
   const [businessKnowledge, setBusinessKnowledge] = useState<BusinessKnowledge>(DEFAULT_BUSINESS_KNOWLEDGE);
   const [appMindset, setAppMindset] = useState<AppMindset>(DEFAULT_APP_MINDSET);
   const [offers, setOffers] = useState<OfferItem[]>(DEFAULT_OFFERS);
+  const [voiceMemory, setVoiceMemory] = useState<VoiceMemory>(DEFAULT_VOICE_MEMORY);
 
   useEffect(() => {
     setTemplates(loadJsonArray(MAPPING_TEMPLATES_KEY, []));
     setBusinessKnowledge(loadJson(BUSINESS_KNOWLEDGE_KEY, DEFAULT_BUSINESS_KNOWLEDGE));
     setAppMindset(loadJson(APP_MINDSET_KEY, DEFAULT_APP_MINDSET));
+    setVoiceMemory(loadJson(VOICE_MEMORY_KEY, DEFAULT_VOICE_MEMORY));
     const loadedOffers = loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS);
     setOffers(loadedOffers);
     setSelectedOfferId(loadedOffers.find((offer) => offer.status === "Active" || offer.status === "Approved")?.id || loadedOffers[0]?.id || "");
@@ -230,6 +235,7 @@ export default function UploadPage() {
     setIsProcessing(true);
     setTimeout(async () => {
       const existingBodies: string[] = [];
+      const existingSubjects: string[] = [];
       const generated = data.map((row, idx) => {
         const { standard, custom } = mappedRecord(row, fieldMapping);
         const draft = generateSageRenewalDraft({
@@ -242,10 +248,13 @@ export default function UploadPage() {
           offer: selectedOffer,
           playbookName: selectedPlaybook,
           existingBodies,
+          existingSubjects,
           liveModelUsed: false,
           modelName: "Sage renewal ORC/SENTINEL/SCRIBE/LEXI",
+          voiceMemory,
         });
         existingBodies.push(draft._body);
+        existingSubjects.push(draft._subject, draft._subject2);
         return {
           ...row,
           ...draft,

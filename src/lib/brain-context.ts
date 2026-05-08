@@ -3,6 +3,8 @@ export const APP_MINDSET_KEY = "emailorcAppMindset";
 export const OFFER_LIBRARY_KEY = "emailorcOfferLibrary";
 export const MAPPING_TEMPLATES_KEY = "emailorcMappingTemplates";
 export const DEVELOPER_KNOWLEDGE_KEY = "emailorcDeveloperKnowledge";
+export const VOICE_MEMORY_KEY = "emailorcVoiceMemory";
+export const LEARNING_LOG_KEY = "emailorcLearningLog";
 
 export type BrainStatus = "Incomplete" | "Ready";
 export type ApprovalStatus = "Draft" | "Approved" | "Needs Review";
@@ -124,6 +126,59 @@ export interface AiContextUsed {
   orc?: Record<string, any>;
   sentinel?: Record<string, any>;
   lexi?: Record<string, any>;
+  feedbackRulesApplied?: string[];
+  approvedExampleUsed?: string;
+  styleExampleMatchStatus?: string;
+  offerAlignmentStatus?: string;
+  appMindsetComplianceStatus?: string;
+  internalLanguageCheckPassed?: boolean;
+  similarityScore?: number;
+}
+
+export interface ApprovedStyleExample {
+  id: string;
+  title: string;
+  type: "Preferred Style Example" | "Offer-Specific Example" | "Campaign-Specific Example" | "Sage Renewal Example";
+  subjectLine1: string;
+  subjectLine2: string;
+  previewText: string;
+  emailBody: string;
+  cta: string;
+  instruction: string;
+  status: "Draft" | "Approved" | "Active";
+  offerName?: string;
+  createdAt?: string;
+  approvedBy?: string;
+}
+
+export interface VoiceMemory {
+  preferredOpenings: string;
+  preferredCtas: string;
+  preferredSubjectLineStyle: string;
+  bannedPhrases: string;
+  rejectedPhrases: string;
+  rejectedStructures: string;
+  offerSpecificRules: string;
+  companySpecificRules: string;
+  approvedDraftPatterns: string;
+  approvedExamples: ApprovedStyleExample[];
+  lastUpdated?: string;
+}
+
+export interface LearningLogItem {
+  feedback_id: string;
+  organization_id: string;
+  user_id: string;
+  source: "draft" | "edit" | "rejection" | "manual" | "example";
+  related_draft_id?: string;
+  related_offer_id?: string;
+  related_campaign_id?: string;
+  feedback_type: string;
+  feedback_text: string;
+  suggested_rule: string;
+  status: "pending" | "approved" | "rejected" | "active";
+  created_at: string;
+  approved_by?: string;
 }
 
 export const DEFAULT_BUSINESS_KNOWLEDGE: BusinessKnowledge = {
@@ -214,6 +269,42 @@ export const DEFAULT_DEVELOPER_KNOWLEDGE: DeveloperKnowledgeItem[] = [
     active: true,
   },
 ];
+
+export const DEFAULT_VOICE_MEMORY: VoiceMemory = {
+  preferredOpenings: "With your Sage renewal coming up; As your renewal window approaches; Before the renewal is finalized",
+  preferredCtas: "Would it be worth a quick 10-minute review?; Would you be open to a quick fit check before renewal?; Reply with a good time, or I can send over a few options.",
+  preferredSubjectLineStyle: "Short, customer-facing, renewal-aware, practical. Avoid internal words like upsell, strategy, campaign, and account growth.",
+  bannedPhrases: "Account Growth Strategy Review, Strategic Angle, Core Risk, Upsell Bridge, Value Outcome, CTA Direction, renewal risk, stalled account growth, better account coverage, missed follow-up, underused features, clearer next steps, campaign mode, upsell results, account growth",
+  rejectedPhrases: "",
+  rejectedStructures: "Do not write 'If [company] renews without reviewing fit...' in final copy. Do not paste internal strategy fields into the email body.",
+  offerSpecificRules: "For Sage cloud-connected upgrades, emphasize cloud-connected access, flexibility, collaboration, less manual work, and keeping accounting tools the customer already relies on.",
+  companySpecificRules: "",
+  approvedDraftPatterns: "Renewal timing -> useful fit review -> selected Sage offer/value angle -> practical outcome -> low-friction CTA.",
+  approvedExamples: [
+    {
+      id: "voice-example-cloud-service-upsell",
+      title: "Cloud Service Upsell Email",
+      type: "Sage Renewal Example",
+      subjectLine1: "Before your Sage renewal",
+      subjectLine2: "Is cloud access worth reviewing?",
+      previewText: "A quick review before renewal can help confirm whether your current Sage setup still fits how your team works.",
+      emailBody: `Hi {{First Name}},
+
+With your Sage renewal coming up, this is a good time to confirm whether your current setup still fits how your business operates day to day.
+
+Many teams are looking for easier access, less manual work, and fewer limits around where and how they manage accounting. A cloud-connected Sage option can help give your team more flexibility while keeping the accounting tools they already rely on.
+
+The goal is not to change systems just for the sake of changing. It is to make sure your renewal supports the way your business is working now — especially if remote access, collaboration, automation, or fewer manual steps would make things easier.
+
+Would it be worth a quick 10-minute review to see whether a cloud-connected option makes sense before your renewal is finalized?`,
+      cta: "Reply with a good time, or I can send over a few options.",
+      instruction: "Use this as a style reference, not copy to duplicate. Future Sage cloud/service upsell emails should follow this level of clarity, structure, tone, and renewal relevance.",
+      status: "Active",
+      offerName: "Cloud Service Upsell / Sage cloud-connected upgrade",
+      createdAt: new Date().toISOString(),
+    },
+  ],
+};
 
 export function contextStatus(value: Record<string, string>, requiredKeys: string[]): BrainStatus {
   return requiredKeys.every((key) => value[key]?.trim()) ? "Ready" : "Incomplete";

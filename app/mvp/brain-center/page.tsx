@@ -45,8 +45,11 @@ import {
   DEFAULT_BUSINESS_KNOWLEDGE,
   DEFAULT_DEVELOPER_KNOWLEDGE,
   DEFAULT_OFFERS,
+  DEFAULT_VOICE_MEMORY,
   DEVELOPER_KNOWLEDGE_KEY,
+  LEARNING_LOG_KEY,
   OFFER_LIBRARY_KEY,
+  VOICE_MEMORY_KEY,
   contextStatus,
   loadJson,
   loadJsonArray,
@@ -54,7 +57,9 @@ import {
   type AppMindset,
   type BusinessKnowledge,
   type DeveloperKnowledgeItem,
+  type LearningLogItem,
   type OfferItem,
+  type VoiceMemory,
 } from "@/lib/brain-context";
 
 type Tab = 
@@ -66,6 +71,7 @@ type Tab =
   | "Model Settings" 
   | "Learning Log" 
   | "Learn Mode"
+  | "Voice Memory"
   | "Developer Knowledge"
   | "API Connection"
   | "Model Test Chat"
@@ -79,6 +85,7 @@ const TABS: { name: Tab; icon: React.ReactNode }[] = [
   { name: "Decision Rules", icon: <ShieldAlert className="h-4 w-4" /> },
   { name: "Model Settings", icon: <Cpu className="h-4 w-4" /> },
   { name: "Learning Log", icon: <History className="h-4 w-4" /> },
+  { name: "Voice Memory", icon: <MessageSquare className="h-4 w-4" /> },
   { name: "Learn Mode", icon: <GraduationCap className="h-4 w-4" /> },
   { name: "Developer Knowledge", icon: <Database className="h-4 w-4" /> },
   { name: "API Connection", icon: <Link2 className="h-4 w-4" /> },
@@ -311,6 +318,8 @@ export default function BrainCenterPage() {
   const [selectedOfferId, setSelectedOfferId] = useState(DEFAULT_OFFERS[0].id);
   const [developerKnowledge, setDeveloperKnowledge] = useState<DeveloperKnowledgeItem[]>(DEFAULT_DEVELOPER_KNOWLEDGE);
   const [selectedDeveloperKnowledgeId, setSelectedDeveloperKnowledgeId] = useState(DEFAULT_DEVELOPER_KNOWLEDGE[0].id);
+  const [voiceMemory, setVoiceMemory] = useState<VoiceMemory>(DEFAULT_VOICE_MEMORY);
+  const [learningLog, setLearningLog] = useState<LearningLogItem[]>([]);
   const [extractionTarget, setExtractionTarget] = useState<ExtractionTarget>("Auto-detect");
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractionReview, setExtractionReview] = useState<{
@@ -338,6 +347,8 @@ export default function BrainCenterPage() {
     const loadedAppMindset = loadJson(APP_MINDSET_KEY, DEFAULT_APP_MINDSET);
     const loadedOffers = loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS);
     const loadedDeveloperKnowledge = loadJsonArray(DEVELOPER_KNOWLEDGE_KEY, DEFAULT_DEVELOPER_KNOWLEDGE);
+    const loadedVoiceMemory = loadJson(VOICE_MEMORY_KEY, DEFAULT_VOICE_MEMORY);
+    const loadedLearningLog = loadJsonArray(LEARNING_LOG_KEY, []);
     const loadedEmbeddingSettings = loadJson(EMBEDDING_SETTINGS_KEY, {
       provider: "OpenRouter",
       modelId: "text-embedding-3-small",
@@ -348,6 +359,8 @@ export default function BrainCenterPage() {
     setAppMindset(loadedAppMindset);
     setOffers(loadedOffers);
     setDeveloperKnowledge(loadedDeveloperKnowledge);
+    setVoiceMemory(loadedVoiceMemory);
+    setLearningLog(loadedLearningLog);
     setSelectedOfferId(loadedOffers[0]?.id || DEFAULT_OFFERS[0].id);
     setSelectedDeveloperKnowledgeId(loadedDeveloperKnowledge[0]?.id || DEFAULT_DEVELOPER_KNOWLEDGE[0].id);
     setEmbeddingProvider(loadedEmbeddingSettings.provider as EmbeddingProvider);
@@ -736,6 +749,13 @@ export default function BrainCenterPage() {
     notice.success("Developer Knowledge saved. It is technical-only and excluded from sales messaging.", "Developer Knowledge saved");
   }
 
+  function saveVoiceMemory() {
+    const next = { ...voiceMemory, lastUpdated: new Date().toISOString() };
+    setVoiceMemory(next);
+    localStorage.setItem(VOICE_MEMORY_KEY, JSON.stringify(next));
+    notice.success("Voice Memory saved. Future Sage renewal drafts will use these style and rejection rules.", "Voice Memory saved");
+  }
+
   function buildKnowledgeContent(sourceType: "Business Knowledge" | "Offer Library" | "Developer Knowledge") {
     if (sourceType === "Business Knowledge") {
       return BUSINESS_KNOWLEDGE_FIELDS
@@ -1116,7 +1136,81 @@ export default function BrainCenterPage() {
               </div>
             )}
 
-            {activeTab === "Developer Knowledge" ? (
+            {activeTab === "Voice Memory" ? (
+              <div className="space-y-6">
+                <div className="rounded-xl border border-violet-100 bg-violet-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-violet-700">Feedback Memory</p>
+                  <p className="mt-1 text-sm text-violet-700">These organization-specific style rules, rejected phrases, and approved examples guide future Sage renewal drafts.</p>
+                </div>
+                <div className="flex justify-end">
+                  <button onClick={saveVoiceMemory} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white"><Save className="h-4 w-4" /> Save Voice Memory</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[
+                    ["preferredOpenings", "Preferred Openings"],
+                    ["preferredCtas", "Preferred CTAs"],
+                    ["preferredSubjectLineStyle", "Preferred Subject Line Style"],
+                    ["bannedPhrases", "Banned Phrases"],
+                    ["rejectedPhrases", "Rejected Phrases"],
+                    ["rejectedStructures", "Rejected Structures"],
+                    ["offerSpecificRules", "Offer-Specific Writing Rules"],
+                    ["companySpecificRules", "Company-Specific Writing Rules"],
+                    ["approvedDraftPatterns", "Approved Draft Patterns"],
+                  ].map(([field, label]) => (
+                    <label key={field} className="space-y-1">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+                      <textarea value={String((voiceMemory as any)[field] || "")} onChange={(e) => setVoiceMemory((prev) => ({ ...prev, [field]: e.target.value }))} rows={field === "approvedDraftPatterns" || field === "offerSpecificRules" ? 4 : 3} className="w-full rounded-xl border-slate-200 text-sm" />
+                    </label>
+                  ))}
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-5">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-400">Approved Examples</p>
+                  <div className="mt-4 space-y-4">
+                    {voiceMemory.approvedExamples.map((example) => (
+                      <div key={example.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <h3 className="font-bold text-slate-900">{example.title}</h3>
+                            <p className="text-xs font-bold text-violet-700">{example.type} · {example.status}</p>
+                          </div>
+                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">Style only, do not copy verbatim</span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-1 gap-2 text-sm text-slate-700">
+                          <p><strong>Subject 1:</strong> {example.subjectLine1}</p>
+                          <p><strong>Subject 2:</strong> {example.subjectLine2}</p>
+                          <p><strong>Preview:</strong> {example.previewText}</p>
+                          <p className="whitespace-pre-wrap rounded-lg bg-white p-3">{example.emailBody}</p>
+                          <p><strong>CTA:</strong> {example.cta}</p>
+                          <p className="text-xs text-slate-500">{example.instruction}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : activeTab === "Learning Log" ? (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Learning Log</p>
+                  <p className="mt-1 text-sm text-slate-600">Draft feedback, rejection reasons, and approved style examples saved from Email Drafts.</p>
+                </div>
+                {(learningLog.length ? learningLog : loadJsonArray<LearningLogItem>(LEARNING_LOG_KEY, [])).map((item) => (
+                  <div key={item.feedback_id} className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">{item.feedback_type}</p>
+                        <p className="text-xs text-slate-500">{item.source} · {item.status} · {new Date(item.created_at).toLocaleString()}</p>
+                      </div>
+                      <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">{item.suggested_rule}</span>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-700">{item.feedback_text}</p>
+                  </div>
+                ))}
+                {!learningLog.length && !loadJsonArray<LearningLogItem>(LEARNING_LOG_KEY, []).length && (
+                  <p className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-500">No feedback saved yet. Use Reject / Teach Brain in Email Drafts.</p>
+                )}
+              </div>
+            ) : activeTab === "Developer Knowledge" ? (
               <div className="space-y-6">
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
