@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
   TEST_CHAT_TASKS,
-  assertModelAllowed,
   fetchOpenRouterModels,
   getOpenRouterKey,
   logBrainUsage,
@@ -34,7 +33,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    assertModelAllowed(model);
     const { key } = await getOpenRouterKey(orgId);
     if (!key) {
       throw new Error("OpenRouter API key is not configured. Save a key or set the OPENROUTER_API_KEY Cloudflare secret.");
@@ -51,6 +49,7 @@ export async function POST(request: Request) {
       prompt,
       systemPrompt: TEST_CHAT_TASKS[task] || TEST_CHAT_TASKS["General Test"],
       maxTokens: 260,
+      timeoutMs: 30000,
     });
 
     const promptTokens = result.usage?.prompt_tokens ?? null;

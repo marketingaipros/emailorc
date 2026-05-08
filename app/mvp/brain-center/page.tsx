@@ -109,6 +109,8 @@ const GPT5_OPTIONS = [
   { value: "openai/gpt-5.1", label: "GPT-5.1" },
 ];
 
+type OpenRouterModelOption = { id: string; name: string; description?: string; modality?: string };
+
 const MODEL_MODE_ROUTING: Record<ModelMode, Record<string, string>> = {
   Economy: {
     orc: "openai/gpt-5-nano",
@@ -317,6 +319,10 @@ export default function BrainCenterPage() {
   const [keySource, setKeySource] = useState("Checking...");
   const [keyStatus, setKeyStatus] = useState("Checking");
   const [keyDisabledReason, setKeyDisabledReason] = useState("Checking OpenRouter key status...");
+  const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModelOption[]>([]);
+  const [modelsCount, setModelsCount] = useState(0);
+  const [selectedModelAvailable, setSelectedModelAvailable] = useState<boolean | null>(null);
+  const [lastApiError, setLastApiError] = useState("");
 
   const [chatModel, setChatModel] = useState(MODEL_MODE_ROUTING.Balanced.scribe);
   const [chatTask, setChatTask] = useState("General Test");
@@ -331,6 +337,19 @@ export default function BrainCenterPage() {
   const environmentName = envConfig.mode === "DEMO" ? "Demo" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production";
   const orgId = typeof window !== "undefined" ? localStorage.getItem("orgId") : null;
   const userId = typeof window !== "undefined" ? localStorage.getItem("userId") : null;
+  const modelOptions = openRouterModels.length
+    ? openRouterModels.map((model) => ({ value: model.id, label: `${model.name || model.id} — ${model.id}` }))
+    : GPT5_OPTIONS.map((option) => ({ value: option.value, label: `${option.label} — ${option.value}` }));
+  const currentModelName = modelOptions.find((option) => option.value === chatModel)?.label?.split(" — ")[0] || chatModel;
+  const testDisabledReason = !apiKeySaved
+    ? keyDisabledReason || "No OpenRouter key saved"
+    : !modelProvider
+      ? "Provider not selected"
+      : !chatModel
+        ? "No model selected"
+        : selectedModelAvailable === false
+          ? "Selected model unavailable. Sync models or choose another model."
+          : "";
 
   async function refreshUsageLogs() {
     try {
@@ -358,6 +377,7 @@ export default function BrainCenterPage() {
       setKeyStatus(data.key_status || (configured ? "Saved" : "Missing"));
       setKeyDisabledReason(configured ? "" : data.database_available ? "No OpenRouter key saved" : "No OpenRouter key saved. Local dev has no D1 binding; use Cloudflare or set OPENROUTER_API_KEY.");
       setConnectionMessage(configured ? `OpenRouter key source: ${data.key_source}.` : "No OpenRouter key is configured.");
+      if (configured) handleSyncModels(false);
     } catch {
       setApiKeySaved(false);
       setKeySource("Not Configured");
@@ -405,12 +425,19 @@ export default function BrainCenterPage() {
   }
 
   async function handleTestConnection() {
-    if (!apiKeySaved) return;
+    if (testDisabledReason) {
+      notice.warning(testDisabledReason, "Test disabled");
+      return;
+    }
     setIsTesting(true);
+    setLastApiError("");
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
       const response = await fetch('/api/brain/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           provider: modelProvider,
           environment: environmentName,
@@ -419,16 +446,20 @@ export default function BrainCenterPage() {
           org_id: orgId,
           user_id: userId,
         })
-      });
+      }).finally(() => clearTimeout(timeout));
       const data = await response.json();
       if (data.status === "connected") {
         setConnectionStatus("Connected");
         setAvailableModelsLoaded(Boolean(data.available_models_loaded));
+        setModelsCount(Number(data.available_models_count || modelsCount || 0));
+        setSelectedModelAvailable(Boolean(data.selected_model_available));
         setModelTested(data.model_tested || null);
         setConnectionMessage(`${data.message || "OpenRouter connection successful."} Key verified: ${data.key_verified ? "Yes" : "No"}. Live Model Response: ${data.live_model_response ? "Yes" : "No"}. Content length: ${data.content_length || 0}.`);
         notice.success(`${data.message} Model tested: ${data.model_tested}. Live response: ${data.live_model_response ? "Yes" : "No"}.`, "OpenRouter connected");
       } else {
         setConnectionStatus("Error");
+        setSelectedModelAvailable(data.selected_model_available === false ? false : selectedModelAvailable);
+        setLastApiError(data.safe_error || data.message || "OpenRouter connection failed.");
         setConnectionMessage(data.safe_error || data.message || "OpenRouter connection failed.");
         notice.error(data.safe_error || data.message || "OpenRouter connection failed.", "OpenRouter failed");
       }
@@ -436,7 +467,8 @@ export default function BrainCenterPage() {
       refreshUsageLogs();
     } catch (err) {
       setConnectionStatus("Provider Unavailable");
-      const message = err instanceof Error ? err.message : "OpenRouter provider unavailable.";
+      const message = err instanceof Error && err.name === "AbortError" ? "OpenRouter test timed out after 20 seconds." : err instanceof Error ? err.message : "OpenRouter provider unavailable.";
+      setLastApiError(message);
       setConnectionMessage(message);
       notice.error(message, "OpenRouter failed");
     } finally {
@@ -455,12 +487,33 @@ export default function BrainCenterPage() {
     notice.info(`Model mode set to ${mode}.`, "Model mode updated");
   }
 
-  function handleSyncModels() {
+  async function handleSyncModels(showNotice = true) {
     setIsSyncing(true);
-    // Simulate API call to fetch latest model definitions
-    setTimeout(() => {
+    try {
+      const response = await fetch(`/api/brain/models?org_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.safe_error || data.message || "Could not sync OpenRouter models.");
+      const synced = data.models || [];
+      setOpenRouterModels(synced);
+      setModelsCount(Number(data.count || synced.length || 0));
+      setAvailableModelsLoaded(synced.length > 0);
+      const ids = new Set(synced.map((model: OpenRouterModelOption) => model.id));
+      const available = ids.has(chatModel);
+      setSelectedModelAvailable(available);
+      if (!available && synced[0]?.id) {
+        setChatModel(synced[0].id);
+        setSelectedModelAvailable(true);
+        notice.info(`Selected first available OpenRouter model: ${synced[0].id}`, "Model selected");
+      } else if (showNotice) {
+        notice.success(`Loaded ${synced.length} OpenRouter models.`, "Models synced");
+      }
+    } catch (error: any) {
+      setAvailableModelsLoaded(false);
+      setLastApiError(error.message || "Could not sync OpenRouter models.");
+      if (showNotice) notice.error(error.message || "Could not sync OpenRouter models.", "Model sync failed");
+    } finally {
       setIsSyncing(false);
-    }, 1500);
+    }
   }
 
   function updateModel(id: string, field: keyof ModelConfig, value: any) {
@@ -1158,7 +1211,7 @@ export default function BrainCenterPage() {
                       <option value="OpenAI">OpenAI</option>
                     </select>
                     <button 
-                      onClick={handleSyncModels}
+                      onClick={() => handleSyncModels(true)}
                       disabled={isSyncing}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
                     >
@@ -1197,10 +1250,9 @@ export default function BrainCenterPage() {
                                 (model.selectedModel === "openai/gpt-5-mini" && connectionStatus === "Error") ? "border-red-300 text-red-700" : ""
                               }`}
                             >
-                              {GPT5_OPTIONS.map((option) => (
+                              {modelOptions.map((option) => (
                                 <option key={option.value} value={option.value}>{option.label}</option>
                               ))}
-                              <option value="text-embedding-3-small">Embeddings 3 Small</option>
                             </select>
                             {model.selectedModel === "openai/gpt-5.1" && connectionStatus === "Connected" && (
                               <p className="text-[10px] text-amber-600 mt-1 font-medium flex items-center gap-1">
@@ -1221,7 +1273,7 @@ export default function BrainCenterPage() {
                               className="w-full text-sm rounded-lg border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
                             >
                               <option value="">None</option>
-                              {GPT5_OPTIONS.map((option) => (
+                              {modelOptions.map((option) => (
                                 <option key={option.value} value={option.value}>{option.label}</option>
                               ))}
                             </select>
@@ -1553,10 +1605,13 @@ export default function BrainCenterPage() {
                       <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Model</label>
                       <select
                         value={chatModel}
-                        onChange={(e) => setChatModel(e.target.value)}
+                        onChange={(e) => {
+                          setChatModel(e.target.value);
+                          setSelectedModelAvailable(openRouterModels.length ? openRouterModels.some((model) => model.id === e.target.value) : null);
+                        }}
                         className="w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700"
                       >
-                        {GPT5_OPTIONS.map((option) => (
+                        {modelOptions.map((option) => (
                           <option key={option.value} value={option.value}>{option.label}</option>
                         ))}
                       </select>
@@ -1704,7 +1759,7 @@ export default function BrainCenterPage() {
                   <div className="flex items-center gap-3 relative z-10">
                     <button 
                       onClick={handleTestConnection}
-                      disabled={isTesting || !apiKeySaved}
+                      disabled={isTesting || Boolean(testDisabledReason)}
                       className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border border-white/5 disabled:opacity-50"
                     >
                       {isTesting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
@@ -1718,9 +1773,9 @@ export default function BrainCenterPage() {
                     </Link>
                   </div>
                 </div>
-                {!apiKeySaved && (
+                {testDisabledReason && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                    Test Connection disabled: {keyDisabledReason || "No OpenRouter key saved"}
+                    Test Connection disabled: {testDisabledReason}
                   </div>
                 )}
 
@@ -1784,7 +1839,19 @@ export default function BrainCenterPage() {
                           </div>
                           <div className="flex justify-between text-xs">
                             <span className="text-slate-500">Available Models:</span>
-                            <span className={`font-bold ${availableModelsLoaded ? "text-emerald-600" : "text-slate-500"}`}>{availableModelsLoaded ? "Yes (Loaded)" : "No"}</span>
+                            <span className={`font-bold ${availableModelsLoaded ? "text-emerald-600" : "text-slate-500"}`}>{availableModelsLoaded ? `Yes (${modelsCount})` : "No"}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Selected Model:</span>
+                            <span className="max-w-[220px] text-right font-bold text-slate-700">{currentModelName}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Selected Model ID:</span>
+                            <span className="max-w-[220px] text-right font-mono text-[10px] font-bold text-slate-700">{chatModel || "None"}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Selected Available:</span>
+                            <span className={`font-bold ${selectedModelAvailable ? "text-emerald-600" : selectedModelAvailable === false ? "text-red-600" : "text-slate-500"}`}>{selectedModelAvailable === null ? "Unknown" : selectedModelAvailable ? "Yes" : "No"}</span>
                           </div>
                           <div className="flex justify-between text-xs">
                             <span className="text-slate-500">Model Tested:</span>
@@ -1794,6 +1861,12 @@ export default function BrainCenterPage() {
                             <span className="text-slate-500">Message:</span>
                             <span className="max-w-[220px] text-right font-bold text-slate-700">{connectionMessage}</span>
                           </div>
+                          {lastApiError && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-slate-500">Last Error:</span>
+                              <span className="max-w-[220px] text-right font-bold text-red-600">{lastApiError}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

@@ -40,7 +40,13 @@ export function normalizeMode(mode: unknown): ModelMode {
 
 export function pickModel(mode: ModelMode, selectedModel?: string) {
   const cleaned = String(selectedModel || "").trim();
-  return cleaned || MODELS_BY_MODE[mode][0];
+  if (!cleaned) return MODELS_BY_MODE[mode][0];
+  const displayMatch = [
+    ["GPT-5 Nano", "openai/gpt-5-nano"],
+    ["GPT-5 Mini", "openai/gpt-5-mini"],
+    ["GPT-5.1", "openai/gpt-5.1"],
+  ].find(([display]) => display.toLowerCase() === cleaned.toLowerCase());
+  return displayMatch?.[1] || cleaned;
 }
 
 export function assertModelAllowed(model: string) {
@@ -242,12 +248,39 @@ export async function fetchOpenRouterModels(apiKey: string) {
   return data.data?.map((model) => model.id).filter(Boolean) || [];
 }
 
+export async function fetchOpenRouterModelCatalog(apiKey: string) {
+  const response = await fetch(OPENROUTER_MODELS_ENDPOINT, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://emailorc-account-growth-demo.dwhitesvp.workers.dev",
+      "X-Title": "EmailORC Account Growth Command Center",
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const error = await response.text().catch(() => "");
+    throw new Error(response.status === 401 ? "OpenRouter rejected this API key." : `OpenRouter models check failed (${response.status}). ${error}`);
+  }
+
+  const data = await response.json() as { data?: Array<{ id: string; name?: string; description?: string; architecture?: { modality?: string } }> };
+  return (data.data || [])
+    .filter((model) => model.id)
+    .map((model) => ({
+      id: model.id,
+      name: model.name || model.id,
+      description: model.description || "",
+      modality: model.architecture?.modality || "",
+    }));
+}
+
 export async function sendOpenRouterChat(params: {
   apiKey: string;
   model: string;
   prompt: string;
   systemPrompt?: string;
   maxTokens?: number;
+  timeoutMs?: number;
 }) {
   return callOpenRouterModel({
     apiKey: params.apiKey,
@@ -259,6 +292,7 @@ export async function sendOpenRouterChat(params: {
     maxTokens: params.maxTokens || 160,
     temperature: 0.3,
     purpose: "chat",
+    timeoutMs: params.timeoutMs,
   });
 }
 
@@ -295,10 +329,14 @@ export async function callOpenRouterModel(params: {
   temperature?: number;
   maxTokens?: number;
   purpose?: string;
+  timeoutMs?: number;
 }) {
   const started = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), params.timeoutMs || 30000);
   const response = await fetch(OPENROUTER_CHAT_ENDPOINT, {
     method: "POST",
+    signal: controller.signal,
     headers: {
       Authorization: `Bearer ${params.apiKey}`,
       "Content-Type": "application/json",
@@ -311,7 +349,7 @@ export async function callOpenRouterModel(params: {
       max_tokens: params.maxTokens || 160,
       temperature: params.temperature ?? 0.3,
     }),
-  });
+  }).finally(() => clearTimeout(timeout));
 
   const text = await response.text();
   let data: any = {};
@@ -332,6 +370,7 @@ export async function callOpenRouterModel(params: {
   const content = parseOpenRouterContent(data);
   const hasChoices = Array.isArray(data?.choices) && data.choices.length > 0;
   const contentLength = content.length;
+  const finishReason = data?.choices?.[0]?.finish_reason || data?.choices?.[0]?.finishReason || null;
 
   console.info("OpenRouter call", {
     provider: "OpenRouter",
@@ -345,7 +384,7 @@ export async function callOpenRouterModel(params: {
   });
 
   if (!content) {
-    throw new Error(hasChoices ? "OpenRouter returned an empty model response." : "OpenRouter response did not include choices.");
+    throw new Error(hasChoices ? `OpenRouter returned an empty model response. HTTP ${response.status}; choices: yes; content length: 0; finish reason: ${finishReason || "unknown"}.` : `OpenRouter response did not include choices. HTTP ${response.status}; choices: no; content length: 0.`);
   }
 
   return {
@@ -355,6 +394,7 @@ export async function callOpenRouterModel(params: {
     rawStatus: response.status,
     hasChoices,
     contentLength,
+    finishReason,
     endpoint: OPENROUTER_CHAT_ENDPOINT,
   };
 }

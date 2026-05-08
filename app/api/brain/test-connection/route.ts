@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
   fetchOpenRouterModels,
-  assertModelAllowed,
   getOpenRouterKey,
   logBrainUsage,
   normalizeMode,
@@ -38,20 +37,20 @@ export async function POST(request: Request) {
     if (!key) {
       throw new Error("OpenRouter API key is not configured. Save a key or set the OPENROUTER_API_KEY Cloudflare secret.");
     }
-    assertModelAllowed(selectedModel);
 
     const keyStatus = await verifyOpenRouterKey(key);
     const availableModels = await fetchOpenRouterModels(key);
     if (!availableModels.includes(selectedModel)) {
-      throw new Error("Selected model unavailable. Choose another model or fallback.");
+      throw new Error(`Selected model unavailable in OpenRouter. Choose another model. Requested model_id: ${selectedModel}.`);
     }
 
     const chatResult = await sendOpenRouterChat({
       apiKey: key,
       model: selectedModel,
       prompt: "Reply with exactly: connected",
-      systemPrompt: "You are validating an API connection. Keep the response short.",
+      systemPrompt: "",
       maxTokens: 24,
+      timeoutMs: 20000,
     });
 
     if (!/connected/i.test(chatResult.content)) {
@@ -85,6 +84,8 @@ export async function POST(request: Request) {
       model_tested: selectedModel,
       model_key_source: source,
       available_models_loaded: availableModels.length > 0,
+      available_models_count: availableModels.length,
+      selected_model_available: true,
       key_verified: true,
       key_usage: keyStatus.usage,
       key_limit: keyStatus.limit,
@@ -94,6 +95,7 @@ export async function POST(request: Request) {
       response_preview: chatResult.content.slice(0, 80),
       content_length: chatResult.contentLength,
       response_status: chatResult.rawStatus,
+      finish_reason: chatResult.finishReason,
       endpoint: OPENROUTER_CHAT_ENDPOINT,
       usage_log_id: usageLogId,
       credits_charged: 0,
@@ -133,6 +135,7 @@ export async function POST(request: Request) {
       safe_error: safeError,
       live_model_response: false,
       content_length: 0,
+      selected_model_available: !/Selected model unavailable/i.test(safeError),
       endpoint: OPENROUTER_CHAT_ENDPOINT,
       usage_log_id: usageLogId,
       credits_charged: 0,
