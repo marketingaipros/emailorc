@@ -94,6 +94,15 @@ export async function getOpenRouterKey(orgId?: string) {
   const serverKey = String(process.env.OPENROUTER_API_KEY || "").trim();
   if (serverKey) return { key: serverKey, source: "secret" as const };
 
+  try {
+    const mod = await import("@opennextjs/cloudflare");
+    const context = await mod.getCloudflareContext({ async: true });
+    const cloudflareKey = String((context.env as any).OPENROUTER_API_KEY || "").trim();
+    if (cloudflareKey) return { key: cloudflareKey, source: "secret" as const };
+  } catch {
+    // Local dev without Cloudflare bindings falls through to organization storage.
+  }
+
   const db = await getD1Database();
   if (db && orgId) {
     await ensureApiSecretsTable(db);
@@ -110,28 +119,67 @@ export async function getOpenRouterKey(orgId?: string) {
   return { key: "", source: "missing" as const };
 }
 
+export async function getOpenRouterKeyStatus(orgId?: string) {
+  const server = await getOpenRouterKey(orgId);
+  const db = await getD1Database();
+  let storedMasked = "";
+
+  if (db && orgId) {
+    await ensureApiSecretsTable(db);
+    const row = await db.prepare(`
+      SELECT masked_value FROM api_secrets
+      WHERE organization_id = ? AND provider = 'OpenRouter'
+      LIMIT 1
+    `).bind(orgId).first() as { masked_value?: string } | null;
+    storedMasked = row?.masked_value || "";
+  }
+
+  return {
+    configured: Boolean(server.key),
+    source: server.source,
+    dbAvailable: Boolean(db),
+    maskedKey: server.source === "stored" ? storedMasked || "Saved securely" : server.source === "secret" ? "Server Cloudflare Secret" : "",
+  };
+}
+
 export async function saveOpenRouterKey(params: { orgId: string; apiKey: string }) {
   const trimmed = params.apiKey.trim();
-  if (!trimmed.startsWith("sk-or-v1-") || trimmed.length < 48) {
-    throw new Error("Enter a valid OpenRouter API key.");
+  if (!trimmed.startsWith("sk-or-") || trimmed.length < 24) {
+    throw new Error("invalid_key_format: Enter a valid OpenRouter API key.");
+  }
+
+  try {
+    await verifyOpenRouterKey(trimmed);
+  } catch (error) {
+    throw new Error(`invalid_key_format: ${safeErrorMessage(error)}`);
   }
 
   const db = await getD1Database();
   if (!db) {
-    throw new Error("API key saving is available in Cloudflare demo/test environments.");
+    throw new Error("missing_database_binding: API key saving requires the Cloudflare D1 binding. Use the server OPENROUTER_API_KEY secret for local testing.");
   }
 
-  await ensureApiSecretsTable(db);
-  const masked = maskApiKey(trimmed);
-  const encrypted = await encryptSecret(trimmed);
-  await db.prepare(`
-    INSERT INTO api_secrets (id, organization_id, provider, encrypted_value, masked_value)
-    VALUES (?, ?, 'OpenRouter', ?, ?)
-    ON CONFLICT(organization_id, provider)
-    DO UPDATE SET encrypted_value = excluded.encrypted_value, masked_value = excluded.masked_value, updated_at = CURRENT_TIMESTAMP
-  `).bind(createId("secret"), params.orgId, encrypted, masked).run();
+  let encrypted = "";
+  try {
+    encrypted = await encryptSecret(trimmed);
+  } catch {
+    throw new Error("encryption_failed: Could not encrypt the OpenRouter API key.");
+  }
 
-  return masked;
+  try {
+    await ensureApiSecretsTable(db);
+    const masked = maskApiKey(trimmed);
+    await db.prepare(`
+      INSERT INTO api_secrets (id, organization_id, provider, encrypted_value, masked_value)
+      VALUES (?, ?, 'OpenRouter', ?, ?)
+      ON CONFLICT(organization_id, provider)
+      DO UPDATE SET encrypted_value = excluded.encrypted_value, masked_value = excluded.masked_value, updated_at = CURRENT_TIMESTAMP
+    `).bind(createId("secret"), params.orgId, encrypted, masked).run();
+
+    return masked;
+  } catch {
+    throw new Error("database_write_failed: Could not save the OpenRouter API key.");
+  }
 }
 
 export function maskApiKey(key: string) {

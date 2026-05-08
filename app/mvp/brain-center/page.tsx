@@ -314,6 +314,9 @@ export default function BrainCenterPage() {
   const [availableModelsLoaded, setAvailableModelsLoaded] = useState(false);
   const [modelTested, setModelTested] = useState<string | null>(null);
   const [connectionMessage, setConnectionMessage] = useState("No live test has been run in this session.");
+  const [keySource, setKeySource] = useState("Checking...");
+  const [keyStatus, setKeyStatus] = useState("Checking");
+  const [keyDisabledReason, setKeyDisabledReason] = useState("Checking OpenRouter key status...");
 
   const [chatModel, setChatModel] = useState(MODEL_MODE_ROUTING.Balanced.scribe);
   const [chatTask, setChatTask] = useState("General Test");
@@ -341,7 +344,27 @@ export default function BrainCenterPage() {
 
   useEffect(() => {
     refreshUsageLogs();
+    refreshApiKeyStatus();
   }, []);
+
+  async function refreshApiKeyStatus() {
+    try {
+      const response = await fetch(`/api/brain/api-key?org_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`);
+      const data = await response.json();
+      const configured = Boolean(data.configured);
+      setApiKeySaved(configured);
+      setMaskedApiKey(data.masked_key || (configured ? "Saved securely" : ""));
+      setKeySource(data.key_source || "Not Configured");
+      setKeyStatus(data.key_status || (configured ? "Saved" : "Missing"));
+      setKeyDisabledReason(configured ? "" : data.database_available ? "No OpenRouter key saved" : "No OpenRouter key saved. Local dev has no D1 binding; use Cloudflare or set OPENROUTER_API_KEY.");
+      setConnectionMessage(configured ? `OpenRouter key source: ${data.key_source}.` : "No OpenRouter key is configured.");
+    } catch {
+      setApiKeySaved(false);
+      setKeySource("Not Configured");
+      setKeyStatus("Error");
+      setKeyDisabledReason("Environment not configured");
+    }
+  }
 
   async function handleSaveApiKey() {
     const trimmed = apiKey.trim();
@@ -365,13 +388,16 @@ export default function BrainCenterPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.safe_error || data.error || "Could not save API key.");
       setMaskedApiKey(data.masked_key || "Saved securely");
+      setKeySource(data.key_source || "Organization Saved Key");
+      setKeyStatus(data.key_status || "Saved");
+      setKeyDisabledReason("");
       setApiKey("");
       setShowKey(false);
       setApiKeySaved(true);
       setConnectionStatus("Not Connected");
       notice.success(data.message || "OpenRouter API key saved securely.", "API key saved");
     } catch (error: any) {
-      setApiKeySaved(false);
+      await refreshApiKeyStatus();
       notice.error(error.message || "Could not save OpenRouter API key.", "API key save failed");
     } finally {
       setIsSaving(false);
@@ -1692,6 +1718,11 @@ export default function BrainCenterPage() {
                     </Link>
                   </div>
                 </div>
+                {!apiKeySaved && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                    Test Connection disabled: {keyDisabledReason || "No OpenRouter key saved"}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6">
                   <div className="space-y-6">
@@ -1738,6 +1769,14 @@ export default function BrainCenterPage() {
                           <div className="flex justify-between text-xs">
                             <span className="text-slate-500">Environment:</span>
                             <span className="font-bold text-indigo-600">{envConfig.mode === "DEMO" ? "Demo" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production"}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Key Source:</span>
+                            <span className="font-bold text-slate-700">{keySource}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Key Status:</span>
+                            <span className={`font-bold ${keyStatus === "Saved" ? "text-emerald-600" : keyStatus === "Error" ? "text-red-600" : "text-amber-600"}`}>{keyStatus}</span>
                           </div>
                           <div className="flex justify-between text-xs">
                             <span className="text-slate-500">Model Mode:</span>
