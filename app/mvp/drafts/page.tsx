@@ -168,8 +168,8 @@ export default function DraftsPage() {
         subject2,
         previewText: row._preview || "",
         body: row._body || "",
-        cta: "Schedule a 15-minute discovery call",
-        personalization: ["Contact Name", "Company Name", "Current Product"],
+        cta: row._cta || "Would it be worth a quick 10-minute review?",
+        personalization: ["Contact Name", "Company Name", "Current Product", "Renewal Timing", "Offer", "Pain Point"],
         qaScore: duplicateSubjects ? Math.min(Number(row._score || 0), 89) : row._score || 0,
         spamRisk: row._spam === "Blocked" ? "High" : row._spam || "Low",
         status: row._status === "Approved" && !duplicateSubjects ? "Approved" : "Pending Review",
@@ -406,6 +406,8 @@ export default function DraftsPage() {
                   <p className="text-xs font-black uppercase tracking-widest text-slate-400">AI Context Used</p>
                   <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Business Knowledge used</span><strong>{draft.aiContext?.businessKnowledgeUsed ? "Yes" : "No"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Live Model Used</span><strong>{draft.aiContext?.liveModelUsed ? "Yes" : "No"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Model Name</span><strong>{draft.aiContext?.modelName || "Not recorded"}</strong></div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">App Mindset used</span><strong>{draft.aiContext?.appMindsetUsed ? "Yes" : "No"}</strong></div>
                     <div className="rounded-lg bg-slate-50 px-3 py-2">
                       <span className="text-slate-500">Offer used</span>
@@ -419,6 +421,10 @@ export default function DraftsPage() {
                       </select>
                     </div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Campaign Playbook used</span><strong>{draft.aiContext?.campaignPlaybookUsed || draft.campaignPlaybook || "Not recorded"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Renewal Data Used</span><strong>{draft.aiContext?.renewalDataUsed ? "Yes" : "No"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">QA Checked by LEXI</span><strong>{draft.aiContext?.qaCheckedByLexi ? "Yes" : "No"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Revision Count</span><strong>{draft.aiContext?.revisionCount ?? draft.revisionCount ?? 0}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Similarity Check Passed</span><strong className={draft.aiContext?.similarityCheckPassed === false ? "text-red-600" : "text-emerald-600"}>{draft.aiContext?.similarityCheckPassed === false ? "No" : "Yes"}</strong></div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Custom fields used</span><strong>{draft.aiContext?.customFieldsUsed?.join(", ") || Object.keys(draft.customFields || {}).join(", ") || "None"}</strong></div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Banned claims found</span><strong className={draft.aiContext?.bannedClaimsFound ? "text-red-600" : "text-emerald-600"}>{draft.aiContext?.bannedClaimsFound ? "Yes" : "No"}</strong></div>
                   </div>
@@ -429,6 +435,21 @@ export default function DraftsPage() {
                   ) : null}
                   <p className="mt-3 text-xs font-bold text-slate-500">Final QA result: {draft.aiContext?.finalQaResult || (draft.qaScore >= 90 ? "Pass" : "Needs Revision")}</p>
                 </div>
+
+                {draft.aiContext?.sentinel || draft.aiContext?.lexi ? (
+                  <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                    <p className="text-xs font-black uppercase tracking-widest text-indigo-700">QA Evidence</p>
+                    <div className="mt-3 grid grid-cols-1 gap-3 text-sm text-indigo-950">
+                      <p><strong>Why written this way:</strong> {draft.aiContext?.sentinel?.strategicAngle || "Not recorded"}</p>
+                      <p><strong>Data points used:</strong> {["Company", draft.company, "Product", draft.product, draft.aiContext?.renewalDataUsed ? "Renewal timing" : "", draft.aiContext?.offerUsed].filter(Boolean).join(" · ")}</p>
+                      <p><strong>Offer used:</strong> {draft.aiContext?.offerUsed || draft.offerName || "Not recorded"}</p>
+                      <p><strong>App Mindset rules applied:</strong> One clear CTA, no invented facts, PAS-style flow, banned phrase check, 90+ QA threshold.</p>
+                      <p><strong>LEXI issues found:</strong> {draft.aiContext?.lexi?.issuesFound?.length ? draft.aiContext.lexi.issuesFound.join(" · ") : "None"}</p>
+                      <p><strong>LEXI revisions made:</strong> {draft.aiContext?.lexi?.revisionsMade?.length ? draft.aiContext.lexi.revisionsMade.join(" · ") : "None"}</p>
+                      <p><strong>Final approval reason:</strong> {draft.aiContext?.lexi?.approvalStatus || draft.aiContext?.finalQaResult || "Not recorded"}</p>
+                    </div>
+                  </div>
+                ) : null}
 
                 {issues.length > 0 && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">

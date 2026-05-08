@@ -19,8 +19,8 @@ import {
   type OfferItem,
   loadJson,
   loadJsonArray,
-  splitList,
 } from "@/lib/brain-context";
+import { generateSageRenewalDraft } from "@/lib/sage-renewal-generator";
 
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
 const QA_APPROVAL_THRESHOLD = 90;
@@ -123,15 +123,6 @@ function currentEnvironment() {
   } catch {
     return "demo";
   }
-}
-
-function alternateSubject(company: string, offer?: OfferItem) {
-  const type = (offer?.offerType || "").toLowerCase();
-  const pain = (offer?.painPointsSolved || "").toLowerCase();
-  if (pain.includes("call") || pain.includes("phone")) return "A better way to cover the phones";
-  if (pain.includes("follow")) return `Better follow-up for ${company}`;
-  if (type.includes("support")) return `Less pressure on your team`;
-  return `A practical next step for ${company}`;
 }
 
 export default function UploadPage() {
@@ -238,73 +229,26 @@ export default function UploadPage() {
 
     setIsProcessing(true);
     setTimeout(async () => {
-      const approvedBusinessKnowledge = businessKnowledge.status === "Approved";
-      const approvedMindset = appMindset.status === "Approved";
-      const activeOffer = selectedOffer?.status === "Active" || selectedOffer?.status === "Approved";
-      const bkReady = approvedBusinessKnowledge && Boolean(businessKnowledge.companyName && businessKnowledge.mainValueProposition && businessKnowledge.approvedPositioningStatement);
-      const mindsetReady = approvedMindset && Boolean(appMindset.primaryGoal && appMindset.qualityThreshold);
-      const bannedPhrases = [
-        ...splitList(mindsetReady ? appMindset.bannedPhrases : DEFAULT_APP_MINDSET.bannedPhrases),
-        ...splitList(activeOffer ? selectedOffer?.bannedClaims || "" : ""),
-        ...splitList(bkReady ? businessKnowledge.bannedClaims : ""),
-      ].map(normalize);
-
+      const existingBodies: string[] = [];
       const generated = data.map((row, idx) => {
         const { standard, custom } = mappedRecord(row, fieldMapping);
-        const fullName = standard["Full Name"] || `${standard["First Name"] || ""} ${standard["Last Name"] || ""}`.trim();
-        const company = standard["Company Name"] || standard["Business Name"] || "your organization";
-        const email = standard.Email || "";
-        const product = standard["Current Product"] || standard["Current Service"] || standard["Current Plan"] || selectedOffer?.offerName || "your current setup";
-        const contactDnc = isDnc(standard["Do Not Contact"]);
-        const hasIdentity = Boolean(company !== "your organization" || fullName);
-        const missingWarnings = [
-          !approvedBusinessKnowledge ? "Business Knowledge is not approved. Draft quality may be limited." : "",
-          !bkReady ? "Business Knowledge is incomplete. Draft quality may be limited." : "",
-          !approvedMindset ? "App Mindset is not approved. Default mindset rules were used." : "",
-          !selectedOffer ? "Offer is missing." : "",
-          !activeOffer ? "Selected offer is not active." : "",
-          !hasIdentity ? "Company Name, Business Name, or Full Name is missing." : "",
-          !email ? "Email is missing." : "",
-          contactDnc ? "Do Not Contact record." : "",
-        ].filter(Boolean);
-        const body = `Hi ${fullName || "there"},\n\nI noticed ${company} may have an opportunity around ${standard["Pain Point"] || (activeOffer ? selectedOffer?.painPointsSolved : "") || "missed follow-up and account growth"}. ${bkReady ? businessKnowledge.approvedPositioningStatement || businessKnowledge.mainValueProposition : "Our team helps turn account records into practical next-step outreach."}\n\nFor ${product}, the practical next step is ${activeOffer ? selectedOffer?.description : "a short strategy review"} focused on ${activeOffer ? selectedOffer?.valueOutcomes : "clearer priorities and better coverage"}.\n\nWould it be useful to schedule a quick conversation to see whether this fits ${company}'s current priorities?\n\nBest,\nAccount Growth Team`;
-        const bannedClaimsFound = bannedPhrases.some((phrase) => phrase && normalize(body).includes(phrase));
-        let score = 94 - missingWarnings.length * 5 - (bannedClaimsFound ? 12 : 0);
-        if (!email || contactDnc || !selectedOffer) score = Math.min(score, 78);
-        score = Math.max(60, Math.min(96, score));
-        const aiContext: AiContextUsed = {
-          businessKnowledgeUsed: bkReady,
-          appMindsetUsed: mindsetReady,
-          offerUsed: selectedOffer?.offerName || "Missing",
-          campaignPlaybookUsed: selectedPlaybook,
-          customFieldsUsed: Object.keys(custom),
-          missingContextWarnings: missingWarnings,
-          bannedClaimsFound,
-          finalQaResult: score >= QA_APPROVAL_THRESHOLD && !bannedClaimsFound ? "Pass" : "Needs Revision",
-        };
+        const draft = generateSageRenewalDraft({
+          id: `upload-${Date.now()}-${idx}`,
+          standard,
+          custom,
+          rowIndex: idx,
+          businessKnowledge,
+          appMindset,
+          offer: selectedOffer,
+          playbookName: selectedPlaybook,
+          existingBodies,
+          liveModelUsed: false,
+          modelName: "Sage renewal ORC/SENTINEL/SCRIBE/LEXI",
+        });
+        existingBodies.push(draft._body);
         return {
           ...row,
-          _id: `upload-${Date.now()}-${idx}`,
-          _name: fullName || standard["Decision Maker"] || "Missing Name",
-          _company: company,
-          _product: product,
-          _email: email,
-          _dnc: contactDnc,
-          _offer_id: selectedOffer?.id,
-          _subject: `${company}: practical next steps`,
-          _subject2: alternateSubject(company, selectedOffer),
-          _preview: `${selectedOffer?.offerName || "A practical review"} for ${company}, grounded in your current account context.`,
-          _body: body,
-          _score: score,
-          _spam: contactDnc ? "Blocked" : bannedClaimsFound ? "Medium" : "Low",
-          _status: score >= QA_APPROVAL_THRESHOLD && !bannedClaimsFound ? "Pending Review" : "Needs Revision",
-          _revision_count: 0,
-          _qa_issues: missingWarnings.concat(bannedClaimsFound ? ["Banned claim detected"] : []),
-          _revisions_made: [],
-          _source: "Upload Data",
-          _standard_fields: standard,
-          _custom_fields: custom,
-          _ai_context: aiContext,
+          ...draft,
         };
       });
       setResults(generated);

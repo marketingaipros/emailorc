@@ -1,15 +1,9 @@
 import { NextResponse } from "next/server";
 import { createId, getD1Database } from "@/lib/cloudflare-db";
+import { DEFAULT_APP_MINDSET, DEFAULT_BUSINESS_KNOWLEDGE, DEFAULT_OFFERS } from "@/lib/brain-context";
+import { generateSageRenewalDraft } from "@/lib/sage-renewal-generator";
 
 export const dynamic = "force-dynamic";
-
-function softSubject(company: string) {
-  return company && company !== "Company" ? `A simpler next step for ${company}` : "A better way to cover the phones";
-}
-
-function directSubject(company: string) {
-  return company && company !== "Company" ? `Missed growth opportunities at ${company}?` : "Missed calls during busy season?";
-}
 
 export async function POST(request: Request) {
   try {
@@ -25,22 +19,47 @@ export async function POST(request: Request) {
 
     if (!draftId) return NextResponse.json({ error: "Missing draft ID." }, { status: 400 });
 
+    const generated = generateSageRenewalDraft({
+      id: draftId,
+      standard: {
+        "Full Name": name,
+        "Company Name": company,
+        Email: String(current.email || current._email || ""),
+        "Current Product": product,
+        "Renewal Date": current.aiContext?.orc?.fields?.["Renewal Date"] || "",
+        "Days to Renew": current.aiContext?.orc?.fields?.["Days to Renew"] || "",
+        Industry: current.aiContext?.orc?.fields?.Industry || "",
+        "Pain Point": current.aiContext?.orc?.fields?.["Pain Point"] || current.aiContext?.sentinel?.valueOutcome || "",
+        "Do Not Contact": "No",
+      },
+      custom: current.customFields || {},
+      rowIndex: revisionCount,
+      businessKnowledge: DEFAULT_BUSINESS_KNOWLEDGE,
+      appMindset: DEFAULT_APP_MINDSET,
+      offer: DEFAULT_OFFERS[0],
+      playbookName: current.campaignPlaybook || current.aiContext?.campaignPlaybookUsed || "Renewal Upsell",
+      existingBodies: [],
+      liveModelUsed: false,
+      modelName: "Sage renewal ORC/SENTINEL/SCRIBE/LEXI regeneration",
+    });
+
     const updatedDraft = {
       ...current,
-      subject1: directSubject(company),
-      subject2: softSubject(company),
-      previewText: `A practical way to improve coverage and follow-up for ${company}.`,
-      body: `Hi ${name},\n\nI wanted to share a more practical angle for ${company}. Based on your current use of ${product}, there may be a straightforward way to improve response coverage without adding more manual follow-up.\n\nWould it be useful if I sent over a short example of what that could look like for your team?\n\nBest,\nAccount Growth Team`,
-      qaScore: 93,
-      spamRisk: "Low",
-      status: "Pending Review",
+      subject1: generated._subject,
+      subject2: generated._subject2,
+      previewText: generated._preview,
+      body: generated._body,
+      cta: generated._cta,
+      qaScore: generated._score,
+      spamRisk: generated._spam,
+      status: generated._status === "Pending Review" ? "Pending Review" : "Regenerate",
       revisionCount,
-      qaIssues: [],
+      qaIssues: generated._qa_issues,
       revisionsMade: [
-        "Created two distinct subject lines",
-        "Softened the email angle",
-        "Raised QA score above approval threshold",
+        ...generated._revisions_made,
+        "Regenerated from the Sage renewal workflow",
       ],
+      aiContext: { ...(generated._ai_context || {}), revisionCount },
     };
 
     const db = await getD1Database();

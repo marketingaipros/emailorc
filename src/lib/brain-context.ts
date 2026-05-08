@@ -107,14 +107,23 @@ export interface DeveloperKnowledgeItem {
 }
 
 export interface AiContextUsed {
+  liveModelUsed?: boolean;
+  modelName?: string;
   businessKnowledgeUsed: boolean;
   appMindsetUsed: boolean;
   offerUsed: string;
   campaignPlaybookUsed: string;
+  renewalDataUsed?: boolean;
   customFieldsUsed: string[];
+  qaCheckedByLexi?: boolean;
+  revisionCount?: number;
+  similarityCheckPassed?: boolean;
   missingContextWarnings: string[];
   bannedClaimsFound: boolean;
   finalQaResult: string;
+  orc?: Record<string, any>;
+  sentinel?: Record<string, any>;
+  lexi?: Record<string, any>;
 }
 
 export const DEFAULT_BUSINESS_KNOWLEDGE: BusinessKnowledge = {
