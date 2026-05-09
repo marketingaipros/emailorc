@@ -293,8 +293,10 @@ export default function DraftsPage() {
         campaignPlaybook: row._ai_context?.campaignPlaybookUsed,
       };
       });
-      const mergedUploaded = uploaded.map((draft: Draft) => ({ ...draft, ...(stateById[String(draft.id)] || {}) }));
-      setDrafts([...mergedUploaded, ...demoDrafts]);
+      const mergedUploaded = uploaded
+        .filter((draft: Draft) => !/practical next steps|unlock enterprise-level growth|pro \\+ analytics/i.test(`${draft.subject1} ${draft.body}`))
+        .map((draft: Draft) => ({ ...draft, ...(stateById[String(draft.id)] || {}) }));
+      setDrafts(mergedUploaded.length ? mergedUploaded : demoDrafts);
     } catch {
       setDrafts(DEMO_DRAFTS);
     }

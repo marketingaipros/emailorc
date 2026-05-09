@@ -13,11 +13,25 @@ export async function GET(request: Request) {
     if (!db) return NextResponse.json({ status: "local", drafts: [] });
 
     const result = await db.prepare(`
-      SELECT d.*, l.contact_name, l.contact_email, l.company, l.product, l.do_not_contact
-      FROM drafts d
-      LEFT JOIN leads l ON l.id = d.lead_id
-      WHERE d.organization_id = ? AND d.environment = ? AND d.archived = 0
-      ORDER BY d.updated_at DESC, d.created_at DESC
+      WITH ranked AS (
+        SELECT
+          d.*,
+          l.contact_name,
+          l.contact_email,
+          l.company,
+          l.product,
+          l.do_not_contact,
+          ROW_NUMBER() OVER (
+            PARTITION BY COALESCE(d.lead_id, l.contact_email, d.id)
+            ORDER BY d.version DESC, d.updated_at DESC, d.created_at DESC
+          ) AS rn
+        FROM drafts d
+        LEFT JOIN leads l ON l.id = d.lead_id
+        WHERE d.organization_id = ? AND d.environment = ? AND d.archived = 0
+      )
+      SELECT * FROM ranked
+      WHERE rn = 1
+      ORDER BY updated_at DESC, created_at DESC
       LIMIT 500
     `).bind(orgId, environment).all();
 

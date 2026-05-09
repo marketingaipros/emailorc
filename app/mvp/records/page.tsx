@@ -8,7 +8,8 @@ import { ACCOUNT_CONTEXT_KEY, type AccountContextSaveMode, type ManualAccountCon
 type RecordStatus = "Ready" | "Missing Email" | "Missing Company" | "Duplicate" | "Do Not Contact" | "Needs Review";
 
 interface CustomerRecord {
-  id: number;
+  id: number | string;
+  displayId?: number;
   name: string;
   company: string;
   email: string;
@@ -19,6 +20,9 @@ interface CustomerRecord {
   status: RecordStatus;
   confidence: number;
   upsell: string;
+  environment?: string;
+  importBatchId?: string;
+  sourceFile?: string;
 }
 
 const DEMO_RECORDS: CustomerRecord[] = [
@@ -65,9 +69,20 @@ export default function RecordsPage() {
   const notice = useNotice();
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<RecordStatus | "All">("All");
-  const [selected, setSelected] = useState<number[]>([]);
-  const [activeRecordId, setActiveRecordId] = useState<number | null>(DEMO_RECORDS[0]?.id || null);
+  const [selected, setSelected] = useState<Array<number | string>>([]);
+  const [records, setRecords] = useState<CustomerRecord[]>([]);
+  const [activeRecordId, setActiveRecordId] = useState<number | string | null>(null);
   const [accountContexts, setAccountContexts] = useState<Record<string, ManualAccountContext>>({});
+  const [isLoadingRecords, setIsLoadingRecords] = useState(true);
+
+  function activeEnvironment() {
+    try {
+      const envConfig = JSON.parse(localStorage.getItem("envConfig") || "{}");
+      return String(envConfig.mode || "demo").toLowerCase().replace("_", "-");
+    } catch {
+      return "demo";
+    }
+  }
 
   useEffect(() => {
     try {
@@ -87,16 +102,35 @@ export default function RecordsPage() {
         });
       })
       .catch(() => {});
+    fetch(`/api/workflow/records?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}&environment=${encodeURIComponent(activeEnvironment())}`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status === "success") {
+          const loaded = data.records || [];
+          setRecords(loaded);
+          setActiveRecordId(loaded[0]?.id || null);
+          if (loaded.length) notice.success(`${loaded.length} records loaded from ${data.environment}.`, "Records loaded");
+        } else {
+          setRecords(DEMO_RECORDS);
+          setActiveRecordId(DEMO_RECORDS[0]?.id || null);
+        }
+      })
+      .catch(() => {
+        setRecords(DEMO_RECORDS);
+        setActiveRecordId(DEMO_RECORDS[0]?.id || null);
+      })
+      .finally(() => setIsLoadingRecords(false));
   }, []);
 
-  const filtered = DEMO_RECORDS.filter((r) => {
+  const visibleRecords = records.length ? records : DEMO_RECORDS;
+  const filtered = visibleRecords.filter((r) => {
     const matchSearch = r.name.toLowerCase().includes(search.toLowerCase()) ||
       r.company.toLowerCase().includes(search.toLowerCase());
     const matchFilter = activeFilter === "All" || r.status === activeFilter;
     return matchSearch && matchFilter;
   });
 
-  const toggleSelect = (id: number) =>
+  const toggleSelect = (id: number | string) =>
     setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
 
   const selectAll = () =>
@@ -104,9 +138,9 @@ export default function RecordsPage() {
 
   const summary = ALL_STATUSES.map((s) => ({
     status: s,
-    count: DEMO_RECORDS.filter((r) => r.status === s).length,
+    count: visibleRecords.filter((r) => r.status === s).length,
   }));
-  const activeRecord = DEMO_RECORDS.find((record) => record.id === activeRecordId) || filtered[0] || DEMO_RECORDS[0];
+  const activeRecord = visibleRecords.find((record) => record.id === activeRecordId) || filtered[0] || visibleRecords[0];
   const activeContextKey = activeRecord ? `${activeRecord.company || "company"}:${activeRecord.name || activeRecord.id}`.toLowerCase() : "";
   const activeContext = { ...EMPTY_ACCOUNT_CONTEXT, ...(accountContexts[activeContextKey] || {}) };
 
@@ -166,7 +200,7 @@ export default function RecordsPage() {
           className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors
             ${activeFilter === "All" ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}
         >
-          All <span className="font-bold">{DEMO_RECORDS.length}</span>
+          All <span className="font-bold">{visibleRecords.length}</span>
         </button>
         {summary.map(({ status, count }) => {
           const cfg = STATUS_CONFIG[status];
@@ -211,6 +245,9 @@ export default function RecordsPage() {
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        {isLoadingRecords && (
+          <div className="border-b border-slate-100 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-500">Loading records from database...</div>
+        )}
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50">

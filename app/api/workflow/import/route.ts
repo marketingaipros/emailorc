@@ -63,7 +63,20 @@ export async function POST(request: Request) {
     }
 
     await db.batch(statements);
-    return NextResponse.json({ status: "success", batch_id: batchId, records_saved: rows.length });
+    const needsReview = rows.filter((row: any) => row._status === "Needs Revision" || row._dnc || !row._email || !row._company).length;
+    return NextResponse.json({
+      status: "success",
+      batch_id: batchId,
+      records_saved: rows.length,
+      summary: {
+        total_rows: rows.length,
+        created: rows.length,
+        updated: 0,
+        duplicates: 0,
+        needs_review: needsReview,
+        failed: 0,
+      },
+    });
   } catch (error: any) {
     return NextResponse.json({ status: "error", error: error.message || "Could not save import." }, { status: 500 });
   }

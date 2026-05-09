@@ -121,12 +121,24 @@ export default function AdminConsole() {
       const current = usersData.find((u: any) => u.email === userEmail);
       setCurrentUser(current);
       
+      const defaultOrgId = current?.memberships?.[0]?.orgId || orgsData[0]?.id || "org_demo";
       if (orgsData.length > 0 && !newUser.organizationId) {
-        const defaultOrgId = current?.memberships?.[0]?.orgId || orgsData[0].id;
         setNewUser(prev => ({ ...prev, organizationId: defaultOrgId }));
       }
       const savedEnv = localStorage.getItem("envConfig");
       if (savedEnv) setEnvConfig(JSON.parse(savedEnv));
+      fetch(`/api/environment/status?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || defaultOrgId || "org_demo")}`, { cache: "no-store" })
+        .then((response) => response.json())
+        .then((status) => {
+          const mode = status.mode as EnvironmentMode | undefined;
+          if (!mode) return;
+          setEnvConfig((current) => {
+            const next = { ...current, mode };
+            localStorage.setItem("envConfig", JSON.stringify(next));
+            return next;
+          });
+        })
+        .catch(() => {});
     } catch (err) {
       setError("Could not load administrative data. Please refresh.");
       notice.error("Could not load administrative data. Please refresh.", "Admin data failed");
