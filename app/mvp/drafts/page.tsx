@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, ShieldAlert, AlertTriangle } from "lucide-react";
 import { useNotice } from "@/components/notice/NoticeProvider";
 import {
+  ACCOUNT_CONTEXT_KEY,
   DEFAULT_OFFERS,
   DEFAULT_VOICE_MEMORY,
   LEARNING_LOG_KEY,
@@ -11,8 +12,10 @@ import {
   VOICE_MEMORY_KEY,
   loadJson,
   loadJsonArray,
+  type AccountContextSaveMode,
   type AiContextUsed,
   type LearningLogItem,
+  type ManualAccountContext,
   type OfferItem,
   type VoiceMemory,
 } from "@/lib/brain-context";
@@ -24,6 +27,24 @@ const QA_APPROVAL_THRESHOLD = 90;
 const INTERNAL_SUBJECT_WORDS = ["upsell", "campaign", "lead magnet", "strategy"];
 const FEEDBACK_REASONS = ["Too Generic", "Does Not Match Company", "Does Not Match Offer", "Wrong Pain Point", "Bad Subject Line", "Bad CTA", "Does Not Sound Human", "Too Salesy", "Too Long", "Too Vague", "Internal Language in Final Copy", "Use This Example as Style Reference", "Other"];
 const LEARNING_OPTIONS = ["Remember this style", "Avoid this phrase", "Avoid this structure", "Improve offer alignment", "Improve renewal context", "Improve company-specific language", "Make future emails more human", "Use this as a preferred example", "One-time feedback only"];
+const EMPTY_ACCOUNT_CONTEXT: ManualAccountContext = {
+  rawText: "",
+  currentPlan: "",
+  currentProduct: "",
+  renewalMonth: "",
+  renewalDate: "",
+  businessDescription: "",
+  industry: "",
+  painPoints: "",
+  operationalNotes: "",
+  crmNotes: "",
+  websiteResearchNotes: "",
+  recommendedUpsell: "",
+  personalizationAngle: "",
+  sourceOfInformation: "",
+  confidenceLevel: "",
+  saveMode: "contact",
+};
 
 interface Draft {
   id: number | string;
@@ -48,6 +69,7 @@ interface Draft {
   customFields?: Record<string, string>;
   offerName?: string;
   campaignPlaybook?: string;
+  accountContext?: Partial<ManualAccountContext>;
 }
 
 const SPAM_COLOR: Record<string, string> = {
@@ -99,6 +121,39 @@ export default function DraftsPage() {
   const [feedbackReason, setFeedbackReason] = useState(FEEDBACK_REASONS[0]);
   const [feedbackLearning, setFeedbackLearning] = useState(LEARNING_OPTIONS[3]);
   const [feedbackText, setFeedbackText] = useState("");
+  const [accountContexts, setAccountContexts] = useState<Record<string, ManualAccountContext>>({});
+
+  function accountKey(draft: Draft) {
+    return `${draft.company || "company"}:${draft.name || draft.id}`.toLowerCase();
+  }
+
+  function draftAccountContext(draft: Draft): ManualAccountContext {
+    return { ...EMPTY_ACCOUNT_CONTEXT, ...(accountContexts[accountKey(draft)] || {}), ...(draft.accountContext || {}) };
+  }
+
+  function updateAccountContext(draft: Draft, patch: Partial<ManualAccountContext>) {
+    const key = accountKey(draft);
+    setAccountContexts((prev) => {
+      const next = { ...prev, [key]: { ...draftAccountContext(draft), ...patch } };
+      localStorage.setItem(ACCOUNT_CONTEXT_KEY, JSON.stringify(next));
+      return next;
+    });
+    setDrafts((prev) => prev.map((item) => item.id === draft.id ? { ...item, accountContext: { ...draftAccountContext(draft), ...patch } } : item));
+  }
+
+  function saveAccountContext(draft: Draft) {
+    const context = { ...draftAccountContext(draft), savedAt: new Date().toISOString() };
+    const key = accountKey(draft);
+    const nextContexts = { ...accountContexts, [key]: context };
+    setAccountContexts(nextContexts);
+    localStorage.setItem(ACCOUNT_CONTEXT_KEY, JSON.stringify(nextContexts));
+    setDrafts((prev) => {
+      const next = prev.map((item) => item.id === draft.id ? { ...item, accountContext: context } : item);
+      persistAllDrafts(next);
+      return next;
+    });
+    notice.success("Account Context saved for this draft and future regeneration.", "Account Context saved");
+  }
 
   function buildQaIssues(draft: Draft) {
     const issues = [...(draft.qaIssues || [])];
@@ -148,12 +203,14 @@ export default function DraftsPage() {
         _qa_issues: buildQaIssues(draft),
         _ai_context: draft.aiContext,
         _custom_fields: draft.customFields || {},
+        _account_context: draft.accountContext || accountContexts[accountKey(draft)] || null,
       }));
     localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(uploaded));
   }
 
   useEffect(() => {
     setOffers(loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS));
+    setAccountContexts(loadJson<Record<string, ManualAccountContext>>(ACCOUNT_CONTEXT_KEY, {}));
     const envConfig = JSON.parse(localStorage.getItem("envConfig") || "{}");
     fetch(`/api/workflow/drafts?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}&environment=${encodeURIComponent(String(envConfig.mode || "demo").toLowerCase().replace("_", "-"))}`)
       .then((response) => response.json())
@@ -198,6 +255,7 @@ export default function DraftsPage() {
         sourceIndex: index,
         aiContext: row._ai_context,
         customFields: row._custom_fields || {},
+        accountContext: row._account_context || row.accountContext || undefined,
         offerName: row._ai_context?.offerUsed,
         campaignPlaybook: row._ai_context?.campaignPlaybookUsed,
       };
@@ -264,6 +322,7 @@ export default function DraftsPage() {
           model_mode: "Balanced",
           organization_id: localStorage.getItem("orgId"),
           user_id: localStorage.getItem("userId"),
+          account_context: draftAccountContext(draft),
         }),
       });
       const data = await response.json();
@@ -480,6 +539,72 @@ export default function DraftsPage() {
                   </div>
                 </div>
 
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-widest text-blue-700">Account Context</p>
+                      <p className="mt-1 text-xs text-blue-700/80">Paste account-specific notes before regenerating so SENTINEL and SCRIBE can write a more specific email.</p>
+                    </div>
+                    <span className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-bold text-blue-700">
+                      Status: {draft.aiContext?.accountContextStatus || (draftAccountContext(draft).rawText ? "Basic" : "None")}
+                    </span>
+                  </div>
+                  <textarea
+                    value={draftAccountContext(draft).rawText}
+                    onChange={(e) => updateAccountContext(draft, { rawText: e.target.value })}
+                    rows={5}
+                    placeholder="Paste any notes about this customer's business, current plan, renewal situation, pain points, operations, website research, CRM notes, or why the selected offer may be relevant."
+                    className="mt-3 w-full rounded-lg border-blue-200 bg-white text-sm"
+                  />
+                  <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+                    {[
+                      ["currentPlan", "Current Plan"],
+                      ["currentProduct", "Current Product"],
+                      ["renewalMonth", "Renewal Month"],
+                      ["renewalDate", "Renewal Date"],
+                      ["businessDescription", "Business Description"],
+                      ["industry", "Industry"],
+                      ["painPoints", "Pain Points"],
+                      ["operationalNotes", "Operational Notes"],
+                      ["crmNotes", "CRM Notes"],
+                      ["websiteResearchNotes", "Website/Public Research Notes"],
+                      ["recommendedUpsell", "Recommended Upsell"],
+                      ["personalizationAngle", "Personalization Angle"],
+                      ["sourceOfInformation", "Source of Information"],
+                    ].map(([key, label]) => (
+                      <input
+                        key={key}
+                        value={String(draftAccountContext(draft)[key as keyof ManualAccountContext] || "")}
+                        onChange={(e) => updateAccountContext(draft, { [key]: e.target.value } as Partial<ManualAccountContext>)}
+                        placeholder={label}
+                        className="rounded-lg border-blue-200 bg-white text-sm"
+                      />
+                    ))}
+                    <select
+                      value={draftAccountContext(draft).confidenceLevel}
+                      onChange={(e) => updateAccountContext(draft, { confidenceLevel: e.target.value as ManualAccountContext["confidenceLevel"] })}
+                      className="rounded-lg border-blue-200 bg-white text-sm"
+                    >
+                      <option value="">Confidence Level</option>
+                      <option value="Low">Low</option>
+                      <option value="Medium">Medium</option>
+                      <option value="High">High</option>
+                    </select>
+                    <select
+                      value={draftAccountContext(draft).saveMode}
+                      onChange={(e) => updateAccountContext(draft, { saveMode: e.target.value as AccountContextSaveMode })}
+                      className="rounded-lg border-blue-200 bg-white text-sm"
+                    >
+                      <option value="contact">Save to this contact/account</option>
+                      <option value="use_once">Use once for this draft only</option>
+                      <option value="company">Save to company/account profile for future drafts</option>
+                    </select>
+                    <button onClick={() => saveAccountContext(draft)} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800">
+                      Save Account Context
+                    </button>
+                  </div>
+                </div>
+
                 <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <p className="text-xs font-black uppercase tracking-widest text-slate-400">AI Context Used</p>
                   <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
@@ -500,6 +625,10 @@ export default function DraftsPage() {
                     </div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Campaign Playbook used</span><strong>{draft.aiContext?.campaignPlaybookUsed || draft.campaignPlaybook || "Not recorded"}</strong></div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Renewal Data Used</span><strong>{draft.aiContext?.renewalDataUsed ? "Yes" : "No"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Account Context used</span><strong>{draft.aiContext?.accountContextUsed ? "Yes" : "No"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Account Intelligence saved</span><strong>{draft.aiContext?.accountIntelligenceSaved ? "Yes" : "No"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Context status</span><strong>{draft.aiContext?.accountContextStatus || "None"}</strong></div>
+                    <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Personalization Level</span><strong>{draft.aiContext?.personalizationLevel || "Basic"}</strong></div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">QA Checked by LEXI</span><strong>{draft.aiContext?.qaCheckedByLexi ? "Yes" : "No"}</strong></div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Revision Count</span><strong>{draft.aiContext?.revisionCount ?? draft.revisionCount ?? 0}</strong></div>
                     <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2"><span className="text-slate-500">Similarity Check Passed</span><strong className={draft.aiContext?.similarityCheckPassed === false ? "text-red-600" : "text-emerald-600"}>{draft.aiContext?.similarityCheckPassed === false ? "No" : "Yes"}</strong></div>
@@ -520,6 +649,7 @@ export default function DraftsPage() {
                     <div className="mt-3 grid grid-cols-1 gap-3 text-sm text-indigo-950">
                       <p><strong>Why written this way:</strong> {draft.aiContext?.sentinel?.strategicAngle || "Not recorded"}</p>
                       <p><strong>Data points used:</strong> {["Company", draft.company, "Product", draft.product, draft.aiContext?.renewalDataUsed ? "Renewal timing" : "", draft.aiContext?.offerUsed].filter(Boolean).join(" · ")}</p>
+                      <p><strong>Account context used:</strong> {draft.aiContext?.manualAccountContextSummary || "No manual account context saved for this draft."}</p>
                       <p><strong>Offer used:</strong> {draft.aiContext?.offerUsed || draft.offerName || "Not recorded"}</p>
                       <p><strong>App Mindset rules applied:</strong> One clear CTA, no invented facts, PAS-style flow, banned phrase check, 90+ QA threshold.</p>
                       <p><strong>LEXI issues found:</strong> {draft.aiContext?.lexi?.issuesFound?.length ? draft.aiContext.lexi.issuesFound.join(" · ") : "None"}</p>

@@ -5,9 +5,33 @@ export const MAPPING_TEMPLATES_KEY = "emailorcMappingTemplates";
 export const DEVELOPER_KNOWLEDGE_KEY = "emailorcDeveloperKnowledge";
 export const VOICE_MEMORY_KEY = "emailorcVoiceMemory";
 export const LEARNING_LOG_KEY = "emailorcLearningLog";
+export const ACCOUNT_CONTEXT_KEY = "emailorcAccountContexts";
 
 export type BrainStatus = "Incomplete" | "Ready";
 export type ApprovalStatus = "Draft" | "Approved" | "Needs Review";
+export type AccountContextSaveMode = "use_once" | "contact" | "company";
+export type AccountContextStatus = "None" | "Basic" | "Strong" | "Detailed";
+export type PersonalizationLevel = "Basic" | "Industry" | "Account-Specific";
+
+export interface ManualAccountContext {
+  rawText: string;
+  currentPlan: string;
+  currentProduct: string;
+  renewalMonth: string;
+  renewalDate: string;
+  businessDescription: string;
+  industry: string;
+  painPoints: string;
+  operationalNotes: string;
+  crmNotes: string;
+  websiteResearchNotes: string;
+  recommendedUpsell: string;
+  personalizationAngle: string;
+  sourceOfInformation: string;
+  confidenceLevel: "Low" | "Medium" | "High" | "";
+  saveMode: AccountContextSaveMode;
+  savedAt?: string;
+}
 
 export interface BusinessKnowledge {
   companyName: string;
@@ -117,6 +141,12 @@ export interface AiContextUsed {
   campaignPlaybookUsed: string;
   renewalDataUsed?: boolean;
   customFieldsUsed: string[];
+  accountContextUsed?: boolean;
+  accountIntelligenceSaved?: boolean;
+  accountContextStatus?: AccountContextStatus;
+  personalizationLevel?: PersonalizationLevel;
+  manualAccountContextSummary?: string;
+  accountContextSaveMode?: AccountContextSaveMode;
   qaCheckedByLexi?: boolean;
   revisionCount?: number;
   similarityCheckPassed?: boolean;

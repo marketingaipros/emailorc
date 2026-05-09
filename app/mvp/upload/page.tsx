@@ -11,12 +11,15 @@ import {
   DEFAULT_BUSINESS_KNOWLEDGE,
   DEFAULT_VOICE_MEMORY,
   DEFAULT_OFFERS,
+  ACCOUNT_CONTEXT_KEY,
   MAPPING_TEMPLATES_KEY,
   OFFER_LIBRARY_KEY,
   VOICE_MEMORY_KEY,
+  type AccountContextSaveMode,
   type AiContextUsed,
   type AppMindset,
   type BusinessKnowledge,
+  type ManualAccountContext,
   type MappingTemplate,
   type OfferItem,
   type VoiceMemory,
@@ -27,6 +30,25 @@ import { generateSageRenewalDraft } from "@/lib/sage-renewal-generator";
 
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
 const QA_APPROVAL_THRESHOLD = 90;
+
+const EMPTY_ACCOUNT_CONTEXT: ManualAccountContext = {
+  rawText: "",
+  currentPlan: "",
+  currentProduct: "",
+  renewalMonth: "",
+  renewalDate: "",
+  businessDescription: "",
+  industry: "",
+  painPoints: "",
+  operationalNotes: "",
+  crmNotes: "",
+  websiteResearchNotes: "",
+  recommendedUpsell: "",
+  personalizationAngle: "",
+  sourceOfInformation: "",
+  confidenceLevel: "",
+  saveMode: "contact",
+};
 
 const STANDARD_FIELDS = [
   "Source Row ID",
@@ -128,6 +150,22 @@ function currentEnvironment() {
   }
 }
 
+function contextKey(standard: Record<string, string>) {
+  return (standard.Email || standard["Company Name"] || standard["Business Name"] || standard["Full Name"] || "bulk").toLowerCase();
+}
+
+function mergeAccountContext(base: ManualAccountContext, standard: Record<string, string>, custom: Record<string, string>) {
+  return {
+    ...base,
+    currentPlan: base.currentPlan || standard["Current Plan"] || "",
+    currentProduct: base.currentProduct || standard["Current Product"] || standard["Current Service"] || "",
+    renewalDate: base.renewalDate || standard["Renewal Date"] || "",
+    industry: base.industry || standard.Industry || "",
+    painPoints: base.painPoints || standard["Pain Point"] || custom["Pain Points"] || "",
+    recommendedUpsell: base.recommendedUpsell || standard["Upsell Offer"] || "",
+  };
+}
+
 export default function UploadPage() {
   const notice = useNotice();
   const [data, setData] = useState<Record<string, any>[]>([]);
@@ -146,6 +184,7 @@ export default function UploadPage() {
   const [appMindset, setAppMindset] = useState<AppMindset>(DEFAULT_APP_MINDSET);
   const [offers, setOffers] = useState<OfferItem[]>(DEFAULT_OFFERS);
   const [voiceMemory, setVoiceMemory] = useState<VoiceMemory>(DEFAULT_VOICE_MEMORY);
+  const [bulkAccountContext, setBulkAccountContext] = useState<ManualAccountContext>(EMPTY_ACCOUNT_CONTEXT);
 
   useEffect(() => {
     setTemplates(loadJsonArray(MAPPING_TEMPLATES_KEY, []));
@@ -238,6 +277,7 @@ export default function UploadPage() {
       const existingSubjects: string[] = [];
       const generated = data.map((row, idx) => {
         const { standard, custom } = mappedRecord(row, fieldMapping);
+        const accountContext = mergeAccountContext(bulkAccountContext, standard, custom);
         const draft = generateSageRenewalDraft({
           id: `upload-${Date.now()}-${idx}`,
           standard,
@@ -252,7 +292,13 @@ export default function UploadPage() {
           liveModelUsed: false,
           modelName: "Sage renewal ORC/SENTINEL/SCRIBE/LEXI",
           voiceMemory,
+          accountContext,
         });
+        if (accountContext.saveMode !== "use_once") {
+          const saved = loadJson<Record<string, ManualAccountContext>>(ACCOUNT_CONTEXT_KEY, {});
+          saved[contextKey(standard)] = { ...accountContext, savedAt: new Date().toISOString() };
+          localStorage.setItem(ACCOUNT_CONTEXT_KEY, JSON.stringify(saved));
+        }
         existingBodies.push(draft._body);
         existingSubjects.push(draft._subject, draft._subject2);
         return {
@@ -275,6 +321,7 @@ export default function UploadPage() {
           offer_name: selectedOffer?.offerName,
           playbook_name: selectedPlaybook,
           records: generated,
+          account_context: bulkAccountContext,
         }),
       }).then(async (response) => {
         const saved = await response.json().catch(() => ({}));
@@ -380,6 +427,58 @@ export default function UploadPage() {
                 {selectedOffer && selectedOffer.status !== "Active" && <p className="text-xs font-semibold text-amber-700">Selected offer is not active. Generation will warn and block approval.</p>}
               </div>
 
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-900">Bulk Account Context</h2>
+                  <p className="mt-1 text-xs text-slate-500">Optional context applied to this import. Row fields still win where they are more specific.</p>
+                </div>
+                <textarea
+                  value={bulkAccountContext.rawText}
+                  onChange={(e) => setBulkAccountContext((prev) => ({ ...prev, rawText: e.target.value }))}
+                  rows={5}
+                  placeholder="Paste account notes, renewal situation, pain points, CRM notes, website research, or why the selected offer may be relevant."
+                  className="w-full rounded-lg border-slate-200 text-sm"
+                />
+                <div className="grid grid-cols-1 gap-2">
+                  {[
+                    ["currentPlan", "Current Plan"],
+                    ["currentProduct", "Current Product"],
+                    ["renewalDate", "Renewal Date"],
+                    ["industry", "Industry"],
+                    ["painPoints", "Pain Points"],
+                    ["recommendedUpsell", "Recommended Upsell"],
+                    ["sourceOfInformation", "Source of Information"],
+                  ].map(([key, label]) => (
+                    <input
+                      key={key}
+                      value={String(bulkAccountContext[key as keyof ManualAccountContext] || "")}
+                      onChange={(e) => setBulkAccountContext((prev) => ({ ...prev, [key]: e.target.value }))}
+                      placeholder={label}
+                      className="rounded-lg border-slate-200 text-sm"
+                    />
+                  ))}
+                  <select
+                    value={bulkAccountContext.confidenceLevel}
+                    onChange={(e) => setBulkAccountContext((prev) => ({ ...prev, confidenceLevel: e.target.value as ManualAccountContext["confidenceLevel"] }))}
+                    className="rounded-lg border-slate-200 text-sm"
+                  >
+                    <option value="">Confidence Level</option>
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                  </select>
+                  <select
+                    value={bulkAccountContext.saveMode}
+                    onChange={(e) => setBulkAccountContext((prev) => ({ ...prev, saveMode: e.target.value as AccountContextSaveMode }))}
+                    className="rounded-lg border-slate-200 text-sm"
+                  >
+                    <option value="contact">Save to this contact/account</option>
+                    <option value="use_once">Use once for this draft only</option>
+                    <option value="company">Save to company/account profile</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-3">
                 <h2 className="text-sm font-semibold text-slate-900">Mapping Templates</h2>
                 <div className="flex gap-2">
@@ -456,6 +555,8 @@ export default function UploadPage() {
                 <span className="rounded-lg bg-indigo-50 px-3 py-1 font-bold text-indigo-700">Business Knowledge: {row._ai_context.businessKnowledgeUsed ? "Yes" : "No"}</span>
                 <span className="rounded-lg bg-violet-50 px-3 py-1 font-bold text-violet-700">App Mindset: {row._ai_context.appMindsetUsed ? "Yes" : "No"}</span>
                 <span className="rounded-lg bg-slate-100 px-3 py-1 font-bold text-slate-700">Custom fields: {row._ai_context.customFieldsUsed.length || 0}</span>
+                <span className="rounded-lg bg-blue-50 px-3 py-1 font-bold text-blue-700">Account Context: {row._ai_context.accountContextStatus || "None"}</span>
+                <span className="rounded-lg bg-emerald-50 px-3 py-1 font-bold text-emerald-700">Personalization: {row._ai_context.personalizationLevel || "Basic"}</span>
               </div>
               {row._qa_issues.length > 0 && <p className="mt-3 text-xs font-semibold text-amber-700">{row._qa_issues.join(" · ")}</p>}
               {row._score >= QA_APPROVAL_THRESHOLD && <div className="mt-4 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"><CheckCircle className="h-4 w-4" /> Ready for Draft Review</div>}

@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     const name = String(current.name || current._name || "there");
     const product = String(current.product || current._product || "your current plan");
     const revisionCount = Number(current.revisionCount || current._revision_count || 0) + 1;
+    const accountContext = body.account_context || current.accountContext || current._account_context || current.aiContext?.orc?.accountContext || {};
 
     if (!draftId) return NextResponse.json({ error: "Missing draft ID." }, { status: 400 });
 
@@ -25,11 +26,13 @@ export async function POST(request: Request) {
         "Full Name": name,
         "Company Name": company,
         Email: String(current.email || current._email || ""),
-        "Current Product": product,
-        "Renewal Date": current.aiContext?.orc?.fields?.["Renewal Date"] || "",
+        "Current Product": accountContext.currentProduct || product,
+        "Current Plan": accountContext.currentPlan || "",
+        "Renewal Date": accountContext.renewalDate || current.aiContext?.orc?.fields?.["Renewal Date"] || "",
         "Days to Renew": current.aiContext?.orc?.fields?.["Days to Renew"] || "",
-        Industry: current.aiContext?.orc?.fields?.Industry || "",
-        "Pain Point": current.aiContext?.orc?.fields?.["Pain Point"] || current.aiContext?.sentinel?.valueOutcome || "",
+        Industry: accountContext.industry || current.aiContext?.orc?.fields?.Industry || "",
+        "Pain Point": accountContext.painPoints || current.aiContext?.orc?.fields?.["Pain Point"] || current.aiContext?.sentinel?.valueOutcome || "",
+        "Upsell Offer": accountContext.recommendedUpsell || current.offerName || current.aiContext?.offerUsed || "",
         "Do Not Contact": "No",
       },
       custom: current.customFields || {},
@@ -42,6 +45,7 @@ export async function POST(request: Request) {
       liveModelUsed: false,
       modelName: "Sage renewal ORC/SENTINEL/SCRIBE/LEXI regeneration",
       voiceMemory: DEFAULT_VOICE_MEMORY,
+      accountContext,
     });
 
     const updatedDraft = {
@@ -61,6 +65,7 @@ export async function POST(request: Request) {
         "Regenerated from the Sage renewal workflow",
       ],
       aiContext: { ...(generated._ai_context || {}), revisionCount },
+      accountContext,
     };
 
     const db = await getD1Database();

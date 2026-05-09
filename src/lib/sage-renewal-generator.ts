@@ -3,6 +3,7 @@ import {
   type AiContextUsed,
   type AppMindset,
   type BusinessKnowledge,
+  type ManualAccountContext,
   type OfferItem,
   type VoiceMemory,
   splitList,
@@ -54,6 +55,7 @@ export interface SageDraftInput {
   liveModelUsed?: boolean;
   modelName?: string;
   voiceMemory?: VoiceMemory;
+  accountContext?: Partial<ManualAccountContext>;
 }
 
 function clean(value?: string | null) {
@@ -203,18 +205,81 @@ function ctaFor(days: number | null) {
   return "Would it be worth a quick 10-minute review?";
 }
 
+function accountContextText(context?: Partial<ManualAccountContext>) {
+  if (!context) return "";
+  return [
+    context.rawText,
+    context.businessDescription,
+    context.operationalNotes,
+    context.crmNotes,
+    context.websiteResearchNotes,
+    context.painPoints,
+    context.personalizationAngle,
+  ].map(clean).filter(Boolean).join(" ");
+}
+
+function accountContextStatus(context?: Partial<ManualAccountContext>) {
+  const text = accountContextText(context);
+  const filled = Object.entries(context || {}).filter(([key, value]) =>
+    !["saveMode", "savedAt"].includes(key) && clean(String(value || ""))
+  ).length;
+  if (!text && filled === 0) return "None" as const;
+  if (text.length > 320 || filled >= 6) return "Detailed" as const;
+  if (text.length > 120 || filled >= 3) return "Strong" as const;
+  return "Basic" as const;
+}
+
+function personalizationLevel(status: ReturnType<typeof accountContextStatus>, industry: string) {
+  if (status === "Strong" || status === "Detailed") return "Account-Specific" as const;
+  if (status === "Basic" || clean(industry)) return "Industry" as const;
+  return "Basic" as const;
+}
+
+function summarizeAccountContext(context?: Partial<ManualAccountContext>) {
+  const text = accountContextText(context);
+  if (!text) return "";
+  return text.length > 220 ? `${text.slice(0, 217).trim()}...` : text;
+}
+
+function accountContextSentence(context: Partial<ManualAccountContext> | undefined, company: string, family: string) {
+  const text = normalize(accountContextText(context));
+  const angle = clean(context?.personalizationAngle);
+  const operations = clean(context?.operationalNotes || context?.businessDescription || context?.rawText);
+  if (!text && !angle) return "";
+  if (angle) return `${angle}`;
+  if (/shipping|warehouse|loading|container|logistics|distribution/.test(text)) {
+    if (family === "cloud") {
+      return `Given the pace of shipping and warehouse work at ${company}, this may also be a good time to look at whether cloud-connected access could make day-to-day visibility easier without tying the team to one office.`;
+    }
+    return `Given the pace of shipping and warehouse work at ${company}, the review can stay focused on visibility, handoffs, and fewer manual steps.`;
+  }
+  if (/remote|multiple location|field|office|collaboration|access/.test(text)) {
+    return `The account context points to access and collaboration as practical reasons to review whether the current Sage setup still fits.`;
+  }
+  if (/inventory|forecast|stock|warehouse/.test(text)) {
+    return `The account context points to inventory visibility and planning rhythm as the most useful review angle.`;
+  }
+  if (/hr|payroll|people|staff|employee/.test(text)) {
+    return `The account context points to finance and people-process handoffs as the most useful review angle.`;
+  }
+  return operations ? `Based on the account notes, the review should stay focused on the parts of ${company}'s operation where better visibility and fewer manual steps would matter most.` : "";
+}
+
 export function generateSageRenewalDraft(input: SageDraftInput) {
   const standard = input.standard;
+  const accountStatus = accountContextStatus(input.accountContext);
+  const accountText = accountContextText(input.accountContext);
+  const accountContextUsed = accountStatus !== "None";
   const firstName = clean(standard["First Name"]) || clean(standard["Full Name"]).split(" ")[0] || clean(standard["Decision Maker"]) || "there";
   const fullName = clean(standard["Full Name"]) || `${clean(standard["First Name"])} ${clean(standard["Last Name"])}`.trim() || clean(standard["Decision Maker"]) || "Missing Name";
   const company = clean(standard["Company Name"]) || clean(standard["Business Name"]) || "your business";
   const email = clean(standard.Email);
-  const product = clean(standard["Current Product"]) || clean(standard["Current Plan"]) || clean(standard["Current Service"]) || "your current Sage setup";
-  const industry = clean(standard.Industry);
-  const pain = clean(standard["Pain Point"]) || clean(input.offer?.painPointsSolved) || clean(standard.Notes);
+  const product = clean(input.accountContext?.currentProduct) || clean(standard["Current Product"]) || clean(input.accountContext?.currentPlan) || clean(standard["Current Plan"]) || clean(standard["Current Service"]) || "your current Sage setup";
+  const industry = clean(input.accountContext?.industry) || clean(standard.Industry);
+  const pain = clean(input.accountContext?.painPoints) || clean(standard["Pain Point"]) || clean(input.offer?.painPointsSolved) || clean(standard.Notes);
   const accountManager = clean(standard["Owner / Account Manager"]) || "Sage team";
-  const days = daysUntilRenewal(standard);
-  const offerName = clean(input.offer?.offerName) || clean(standard["Upsell Offer"]);
+  const days = input.accountContext?.renewalDate ? daysUntilRenewal({ ...standard, "Renewal Date": input.accountContext.renewalDate }) : daysUntilRenewal(standard);
+  const offerName = clean(input.accountContext?.recommendedUpsell) || clean(input.offer?.offerName) || clean(standard["Upsell Offer"]);
   const offerType = clean(input.offer?.offerType) || clean(standard["Offer Type"]) || "Upsell";
   const dnc = /^(true|yes|y|1|do not contact|dnc)$/i.test(clean(standard["Do Not Contact"]));
   const missingFields = [
@@ -225,7 +290,7 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
   ].filter(Boolean);
 
   const mode = classifyMode(standard, days, input.offer);
-  const family = offerFamily(input.offer, pain);
+  const family = offerFamily(input.offer, `${pain} ${accountText} ${offerName}`);
   const finalOfferName = clientFacingOfferName(input.offer, family);
   const outcome = practicalOutcome(family, input.offer);
   const flags = [
@@ -241,8 +306,10 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
     || clean(input.businessKnowledge.mainValueProposition)
     || defaultSageKnowledge();
   const strategy = {
-    strategicAngle: strategicAngle({ product, industry, pain, offer: input.offer, days }),
-    coreRisk: pain ? `If ${company} renews without reviewing fit, the team may keep carrying ${pain.toLowerCase()}.` : `If ${company} renews without a fit check, avoidable manual work may continue.`, 
+    strategicAngle: strategicAngle({ product, industry, pain: `${pain} ${accountText}`, offer: input.offer, days }),
+    coreRisk: accountContextUsed
+      ? `Use the account context to keep the review tied to ${company}'s real operating situation without overloading the email with every detail.`
+      : pain ? `If ${company} renews without reviewing fit, the team may keep carrying ${pain.toLowerCase()}.` : `If ${company} renews without a fit check, avoidable manual work may continue.`,
     upsellBridge: offerName ? `${finalOfferName} connects the renewal review to ${outcome}.` : "No active offer was selected, so final-ready generation should be blocked.",
     valueOutcome: outcome,
     ctaDirection: ctaFor(days),
@@ -267,10 +334,11 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
       ? `For teams managing inventory and forecasting, renewal timing is a useful point to look at whether planning work is still too manual or disconnected. ${finalOfferName} can help focus that review around visibility and better planning rhythm.`
       : family === "hr"
         ? `If finance and HR work are starting to feel disconnected, renewal timing is a practical moment to review whether ${finalOfferName} could simplify the handoffs around people, payroll, and business operations.`
-        : `Renewal timing is a practical moment to review whether ${finalOfferName} would help reduce manual work, improve visibility, or simplify the way the team operates.`;
+      : `Renewal timing is a practical moment to review whether ${finalOfferName} would help reduce manual work, improve visibility, or simplify the way the team operates.`;
+  const accountContextLine = accountContextSentence(input.accountContext, company, family);
   const proofParagraph = family === "cloud"
-    ? `The goal is not to change systems just for the sake of changing. It is to make sure the renewal supports how ${company} works now, especially if remote access, collaboration, automation, or fewer manual steps would make things easier.`
-    : `The goal is not to add another project. It is to use the renewal window to make sure the current Sage setup still fits the way ${company} is operating now.`;
+    ? accountContextLine || `The goal is not to change systems just for the sake of changing. It is to make sure the renewal supports how ${company} works now, especially if remote access, collaboration, automation, or fewer manual steps would make things easier.`
+    : accountContextLine || `The goal is not to add another project. It is to use the renewal window to make sure the current Sage setup still fits the way ${company} is operating now.`;
   const body = [
     `Hi ${firstName},`,
     "",
@@ -310,6 +378,7 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
   );
   const ctaCount = (body.match(/\?/g) || []).length;
   const oneCtaOnly = ctaCount <= 1;
+  const accountContextNotUsed = accountContextUsed && !normalize(body).includes(normalize(company)) && !accountContextLine;
   let score = 98;
   score -= missingFields.length * 4;
   score -= flags.includes("Insufficient Personalization") ? 6 : 0;
@@ -321,10 +390,13 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
   score -= internalLanguageFound ? 25 : 0;
   score -= !offerAlignmentPassed ? 18 : 0;
   score -= !oneCtaOnly ? 8 : 0;
+  score -= accountContextNotUsed ? 8 : 0;
   score = Math.max(60, Math.min(98, score));
 
   const issues = [
     ...flags,
+    !accountContextUsed ? "Limited account context available. Email may be more general." : "",
+    accountContextNotUsed ? "Manual account context was not reflected in the draft" : "",
     subjectIssue ? "Duplicate or internal subject line" : "",
     bannedFound ? "Banned claim or phrase detected" : "",
     internalLanguageFound ? "Internal strategy language appeared in final copy" : "",
@@ -339,6 +411,7 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
     "LEXI checked subject lines, banned phrases, context, and uniqueness",
     tooSimilar || subjectRepeat ? "LEXI varied the row angle because similarity was too high" : "",
     "LEXI blocked internal strategy language from final copy",
+    accountContextUsed ? "LEXI verified manual Account Context was used without dumping every pasted detail" : "",
     input.voiceMemory?.approvedExamples?.[0]?.title ? `Matched style reference: ${input.voiceMemory.approvedExamples[0].title}` : "",
   ].filter(Boolean);
   const approved = score >= QA_THRESHOLD && !dnc && !bannedFound && !subjectIssue && !tooSimilar && !subjectRepeat && !internalLanguageFound && offerAlignmentPassed && oneCtaOnly && Boolean(offerName);
@@ -351,6 +424,12 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
     campaignPlaybookUsed: input.playbookName,
     renewalDataUsed: days !== null,
     customFieldsUsed: Object.keys(input.custom || {}),
+    accountContextUsed,
+    accountIntelligenceSaved: input.accountContext?.saveMode !== "use_once" && accountContextUsed,
+    accountContextStatus: accountStatus,
+    personalizationLevel: personalizationLevel(accountStatus, industry),
+    manualAccountContextSummary: summarizeAccountContext(input.accountContext),
+    accountContextSaveMode: input.accountContext?.saveMode || "contact",
     qaCheckedByLexi: true,
     revisionCount: approved ? 1 : 2,
     similarityCheckPassed: !tooSimilar && !subjectRepeat,
@@ -368,7 +447,7 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
     missingContextWarnings: issues,
     bannedClaimsFound: bannedFound,
     finalQaResult: approved ? "Pass - ready for human review" : "Needs Review",
-    orc: { mode, fields: standard, missingFields, flags },
+    orc: { mode, fields: standard, accountContext: input.accountContext || {}, missingFields, flags },
     sentinel: strategy,
     lexi: {
       qaStatus: approved ? "Pass" : "Needs Review",
@@ -377,7 +456,7 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
       spamRiskLevel: bannedFound ? "Medium" : "Low",
       issuesFound: issues,
       revisionsMade,
-      humanizationNotes: `Personalized by ${company}, ${product}, ${industry || "industry not provided"}, renewal timing, pain point, and ${offerName || "missing offer"}.`,
+      humanizationNotes: `Personalized by ${company}, ${product}, ${industry || "industry not provided"}, renewal timing, pain point, ${accountContextUsed ? "manual account context, " : ""}and ${offerName || "missing offer"}.`,
       topIssuesLoweringScore: issues.slice(0, 3),
       requiredFixes: approved ? [] : issues,
       revisionCount: approved ? 1 : 2,
@@ -412,6 +491,7 @@ export function generateSageRenewalDraft(input: SageDraftInput) {
     _source: "Upload Data",
     _standard_fields: standard,
     _custom_fields: input.custom,
+    _account_context: input.accountContext || null,
     _ai_context: aiContext,
     _strategy: strategy,
   };

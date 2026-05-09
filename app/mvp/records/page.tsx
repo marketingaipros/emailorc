@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Search, Filter, ChevronDown, User, Building2, Mail, AlertTriangle, XCircle, CheckCircle, Clock, Eye } from "lucide-react";
+import { useNotice } from "@/components/notice/NoticeProvider";
+import { ACCOUNT_CONTEXT_KEY, type AccountContextSaveMode, type ManualAccountContext } from "@/lib/brain-context";
 
 type RecordStatus = "Ready" | "Missing Email" | "Missing Company" | "Duplicate" | "Do Not Contact" | "Needs Review";
 
@@ -40,11 +42,40 @@ const STATUS_CONFIG: Record<RecordStatus, { label: string; color: string; icon: 
 };
 
 const ALL_STATUSES: RecordStatus[] = ["Ready", "Missing Email", "Missing Company", "Duplicate", "Do Not Contact", "Needs Review"];
+const EMPTY_ACCOUNT_CONTEXT: ManualAccountContext = {
+  rawText: "",
+  currentPlan: "",
+  currentProduct: "",
+  renewalMonth: "",
+  renewalDate: "",
+  businessDescription: "",
+  industry: "",
+  painPoints: "",
+  operationalNotes: "",
+  crmNotes: "",
+  websiteResearchNotes: "",
+  recommendedUpsell: "",
+  personalizationAngle: "",
+  sourceOfInformation: "",
+  confidenceLevel: "",
+  saveMode: "contact",
+};
 
 export default function RecordsPage() {
+  const notice = useNotice();
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<RecordStatus | "All">("All");
   const [selected, setSelected] = useState<number[]>([]);
+  const [activeRecordId, setActiveRecordId] = useState<number | null>(DEMO_RECORDS[0]?.id || null);
+  const [accountContexts, setAccountContexts] = useState<Record<string, ManualAccountContext>>({});
+
+  useEffect(() => {
+    try {
+      setAccountContexts(JSON.parse(localStorage.getItem(ACCOUNT_CONTEXT_KEY) || "{}"));
+    } catch {
+      setAccountContexts({});
+    }
+  }, []);
 
   const filtered = DEMO_RECORDS.filter((r) => {
     const matchSearch = r.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -63,6 +94,32 @@ export default function RecordsPage() {
     status: s,
     count: DEMO_RECORDS.filter((r) => r.status === s).length,
   }));
+  const activeRecord = DEMO_RECORDS.find((record) => record.id === activeRecordId) || filtered[0] || DEMO_RECORDS[0];
+  const activeContextKey = activeRecord ? `${activeRecord.company || "company"}:${activeRecord.name || activeRecord.id}`.toLowerCase() : "";
+  const activeContext = { ...EMPTY_ACCOUNT_CONTEXT, ...(accountContexts[activeContextKey] || {}) };
+
+  function updateActiveContext(patch: Partial<ManualAccountContext>) {
+    if (!activeContextKey) return;
+    setAccountContexts((prev) => ({ ...prev, [activeContextKey]: { ...activeContext, ...patch } }));
+  }
+
+  function saveActiveContext() {
+    if (!activeContextKey || !activeRecord) return;
+    const next = {
+      ...accountContexts,
+      [activeContextKey]: {
+        ...activeContext,
+        currentProduct: activeContext.currentProduct || activeRecord.product,
+        renewalDate: activeContext.renewalDate || activeRecord.renewal,
+        industry: activeContext.industry || activeRecord.industry,
+        recommendedUpsell: activeContext.recommendedUpsell || activeRecord.upsell,
+        savedAt: new Date().toISOString(),
+      },
+    };
+    setAccountContexts(next);
+    localStorage.setItem(ACCOUNT_CONTEXT_KEY, JSON.stringify(next));
+    notice.success("Account Context saved to this contact/account.", "Account Context saved");
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -125,6 +182,7 @@ export default function RecordsPage() {
         )}
       </div>
 
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
@@ -151,7 +209,7 @@ export default function RecordsPage() {
             {filtered.map((record) => {
               const cfg = STATUS_CONFIG[record.status];
               return (
-                <tr key={record.id} className="hover:bg-slate-50/60 transition-colors">
+                <tr key={record.id} onClick={() => setActiveRecordId(record.id)} className={`hover:bg-slate-50/60 transition-colors cursor-pointer ${activeRecordId === record.id ? "bg-indigo-50/60" : ""}`}>
                   <td className="px-4 py-3">
                     <input
                       type="checkbox"
@@ -208,6 +266,64 @@ export default function RecordsPage() {
             <p className="text-sm">No records match your filters.</p>
           </div>
         )}
+      </div>
+      <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Account Context</h2>
+            <p className="mt-1 text-xs text-slate-500">{activeRecord?.company} · {activeRecord?.name}</p>
+          </div>
+          <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+            {activeContext.rawText || activeContext.operationalNotes ? "Saved" : "None"}
+          </span>
+        </div>
+        <textarea
+          value={activeContext.rawText}
+          onChange={(e) => updateActiveContext({ rawText: e.target.value })}
+          rows={8}
+          placeholder="Paste any notes about this customer's business, current plan, renewal situation, pain points, operations, website research, CRM notes, or why the selected offer may be relevant."
+          className="mt-4 w-full rounded-lg border-slate-200 text-sm"
+        />
+        <div className="mt-3 grid grid-cols-1 gap-2">
+          {[
+            ["currentPlan", "Current Plan"],
+            ["currentProduct", "Current Product"],
+            ["renewalMonth", "Renewal Month"],
+            ["renewalDate", "Renewal Date"],
+            ["businessDescription", "Business Description"],
+            ["industry", "Industry"],
+            ["painPoints", "Pain Points"],
+            ["operationalNotes", "Operational Notes"],
+            ["crmNotes", "CRM Notes"],
+            ["websiteResearchNotes", "Website/Public Research Notes"],
+            ["recommendedUpsell", "Recommended Upsell"],
+            ["personalizationAngle", "Personalization Angle"],
+            ["sourceOfInformation", "Source of Information"],
+          ].map(([key, label]) => (
+            <input
+              key={key}
+              value={String(activeContext[key as keyof ManualAccountContext] || "")}
+              onChange={(e) => updateActiveContext({ [key]: e.target.value } as Partial<ManualAccountContext>)}
+              placeholder={label}
+              className="rounded-lg border-slate-200 text-sm"
+            />
+          ))}
+          <select value={activeContext.confidenceLevel} onChange={(e) => updateActiveContext({ confidenceLevel: e.target.value as ManualAccountContext["confidenceLevel"] })} className="rounded-lg border-slate-200 text-sm">
+            <option value="">Confidence Level</option>
+            <option value="Low">Low</option>
+            <option value="Medium">Medium</option>
+            <option value="High">High</option>
+          </select>
+          <select value={activeContext.saveMode} onChange={(e) => updateActiveContext({ saveMode: e.target.value as AccountContextSaveMode })} className="rounded-lg border-slate-200 text-sm">
+            <option value="contact">Save to this contact/account</option>
+            <option value="use_once">Use once for this draft only</option>
+            <option value="company">Save to company/account profile for future drafts</option>
+          </select>
+          <button onClick={saveActiveContext} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700">
+            Save Account Context
+          </button>
+        </div>
+      </div>
       </div>
     </div>
   );
