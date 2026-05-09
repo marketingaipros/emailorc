@@ -127,6 +127,26 @@ export default function DraftsPage() {
     return `${draft.company || "company"}:${draft.name || draft.id}`.toLowerCase();
   }
 
+  function companyKey(draft: Draft) {
+    return String(draft.company || "").trim().toLowerCase();
+  }
+
+  function persistAccountContextRemote(draft: Draft, context: ManualAccountContext) {
+    if (context.saveMode === "use_once") return;
+    fetch("/api/account-intelligence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        organization_id: localStorage.getItem("orgId") || "org_demo",
+        user_id: localStorage.getItem("userId") || "user_super_admin",
+        contact_key: accountKey(draft),
+        company_key: companyKey(draft),
+        save_scope: context.saveMode,
+        context,
+      }),
+    }).catch(() => {});
+  }
+
   function draftAccountContext(draft: Draft): ManualAccountContext {
     return { ...EMPTY_ACCOUNT_CONTEXT, ...(accountContexts[accountKey(draft)] || {}), ...(draft.accountContext || {}) };
   }
@@ -147,6 +167,7 @@ export default function DraftsPage() {
     const nextContexts = { ...accountContexts, [key]: context };
     setAccountContexts(nextContexts);
     localStorage.setItem(ACCOUNT_CONTEXT_KEY, JSON.stringify(nextContexts));
+    persistAccountContextRemote(draft, context);
     setDrafts((prev) => {
       const next = prev.map((item) => item.id === draft.id ? { ...item, accountContext: context } : item);
       persistAllDrafts(next);
@@ -211,6 +232,18 @@ export default function DraftsPage() {
   useEffect(() => {
     setOffers(loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS));
     setAccountContexts(loadJson<Record<string, ManualAccountContext>>(ACCOUNT_CONTEXT_KEY, {}));
+    fetch(`/api/account-intelligence?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status !== "success") return;
+        const remote = Object.fromEntries((data.items || []).map((item: any) => [item.contact_key || item.company_key, item.context]));
+        setAccountContexts((current) => {
+          const next = { ...remote, ...current };
+          localStorage.setItem(ACCOUNT_CONTEXT_KEY, JSON.stringify(next));
+          return next;
+        });
+      })
+      .catch(() => {});
     const envConfig = JSON.parse(localStorage.getItem("envConfig") || "{}");
     fetch(`/api/workflow/drafts?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}&environment=${encodeURIComponent(String(envConfig.mode || "demo").toLowerCase().replace("_", "-"))}`)
       .then((response) => response.json())

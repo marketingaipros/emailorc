@@ -296,8 +296,21 @@ export default function UploadPage() {
         });
         if (accountContext.saveMode !== "use_once") {
           const saved = loadJson<Record<string, ManualAccountContext>>(ACCOUNT_CONTEXT_KEY, {});
-          saved[contextKey(standard)] = { ...accountContext, savedAt: new Date().toISOString() };
+          const key = contextKey(standard);
+          saved[key] = { ...accountContext, savedAt: new Date().toISOString() };
           localStorage.setItem(ACCOUNT_CONTEXT_KEY, JSON.stringify(saved));
+          fetch("/api/account-intelligence", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              organization_id: localStorage.getItem("orgId") || "org_demo",
+              user_id: localStorage.getItem("userId") || "user_super_admin",
+              contact_key: key,
+              company_key: String(standard["Company Name"] || standard["Business Name"] || "").trim().toLowerCase(),
+              save_scope: accountContext.saveMode,
+              context: saved[key],
+            }),
+          }).catch(() => {});
         }
         existingBodies.push(draft._body);
         existingSubjects.push(draft._subject, draft._subject2);

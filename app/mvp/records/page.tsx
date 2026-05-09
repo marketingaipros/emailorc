@@ -75,6 +75,18 @@ export default function RecordsPage() {
     } catch {
       setAccountContexts({});
     }
+    fetch(`/api/account-intelligence?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status !== "success") return;
+        const remote = Object.fromEntries((data.items || []).map((item: any) => [item.contact_key || item.company_key, item.context]));
+        setAccountContexts((current) => {
+          const next = { ...remote, ...current };
+          localStorage.setItem(ACCOUNT_CONTEXT_KEY, JSON.stringify(next));
+          return next;
+        });
+      })
+      .catch(() => {});
   }, []);
 
   const filtered = DEMO_RECORDS.filter((r) => {
@@ -118,6 +130,20 @@ export default function RecordsPage() {
     };
     setAccountContexts(next);
     localStorage.setItem(ACCOUNT_CONTEXT_KEY, JSON.stringify(next));
+    if (next[activeContextKey].saveMode !== "use_once") {
+      fetch("/api/account-intelligence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization_id: localStorage.getItem("orgId") || "org_demo",
+          user_id: localStorage.getItem("userId") || "user_super_admin",
+          contact_key: activeContextKey,
+          company_key: String(activeRecord.company || "").trim().toLowerCase(),
+          save_scope: next[activeContextKey].saveMode,
+          context: next[activeContextKey],
+        }),
+      }).catch(() => {});
+    }
     notice.success("Account Context saved to this contact/account.", "Account Context saved");
   }
 
