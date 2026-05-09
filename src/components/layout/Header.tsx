@@ -26,12 +26,14 @@ export function Header() {
   const [name, setName] = useState<string | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [envMode, setEnvMode] = useState<"DEMO" | "TEST_LIVE" | "PRODUCTION">("DEMO");
+  const [plan, setPlan] = useState("Trial");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setRole(localStorage.getItem("userRole"));
     setEmail(localStorage.getItem("userEmail"));
     setName(localStorage.getItem("userName"));
+    setPlan(localStorage.getItem("userPlan") || "Trial");
 
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -144,6 +146,7 @@ export function Header() {
                 <div className="px-4 py-3 bg-slate-50 border-b border-slate-100">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Logged in as</p>
                   <p className="text-xs font-bold text-slate-900 truncate mt-0.5">{email || "No email"}</p>
+                  <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-indigo-600">Plan: {plan}</p>
                 </div>
                 
                 <div className="p-1.5">

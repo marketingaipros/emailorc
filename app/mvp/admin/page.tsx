@@ -41,7 +41,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useNotice } from "@/components/notice/NoticeProvider";
 
-type AdminTab = "Users" | "Organizations" | "Roles & Permissions" | "Subscription Plans" | "AI Credits" | "Usage Logs" | "API Settings" | "Environment" | "System Health";
+type AdminTab = "Users" | "Organizations" | "Roles & Permissions" | "Subscription Plans" | "AI Credits" | "Usage Logs" | "API Settings" | "Environment" | "Data Management" | "System Health";
 
 type EnvironmentMode = "DEMO" | "TEST_LIVE" | "PRODUCTION";
 
@@ -70,6 +70,9 @@ export default function AdminConsole() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [systemHealth, setSystemHealth] = useState<any>(null);
+  const [selectedOrgId, setSelectedOrgId] = useState("");
+  const [planForm, setPlanForm] = useState({ plan: "Trial", credits: 100, status: "TRIAL_ACTIVE", trialDays: 14, organizationStatus: "ACTIVE" });
+  const [resetForm, setResetForm] = useState({ resetType: "test-live", organizationId: "", includeUsageLogs: false, includeBrain: false, confirmed: false, confirmation: "" });
   
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [envConfig, setEnvConfig] = useState<EnvironmentConfig>({
@@ -100,6 +103,18 @@ export default function AdminConsole() {
       
       setUserList(usersData);
       setOrganizations(orgsData);
+      if (orgsData.length) {
+        const firstOrg = orgsData[0];
+        setSelectedOrgId((current) => current || firstOrg.id);
+        setResetForm((prev) => ({ ...prev, organizationId: prev.organizationId || firstOrg.id }));
+        setPlanForm({
+          plan: firstOrg.plan || "Trial",
+          credits: Number(firstOrg.aiCredits || firstOrg.creditsRemaining || 100),
+          status: firstOrg.subscriptionStatus || "TRIAL_ACTIVE",
+          trialDays: 14,
+          organizationStatus: firstOrg.status || "ACTIVE",
+        });
+      }
 
       // Get current user info from the list for permission checks
       const userEmail = localStorage.getItem("userEmail");
@@ -346,6 +361,69 @@ export default function AdminConsole() {
     notice.info("Invite link copied.", "Copied");
   };
 
+  const selectedOrganization = organizations.find((org) => org.id === selectedOrgId) || organizations[0];
+
+  const selectOrganization = (orgId: string) => {
+    const org = organizations.find((item) => item.id === orgId);
+    setSelectedOrgId(orgId);
+    if (org) {
+      setPlanForm({
+        plan: org.plan || "Trial",
+        credits: Number(org.aiCredits || org.creditsRemaining || 100),
+        status: org.subscriptionStatus || "TRIAL_ACTIVE",
+        trialDays: 14,
+        organizationStatus: org.status || "ACTIVE",
+      });
+    }
+  };
+
+  const updateOrganizationPlan = async () => {
+    if (!selectedOrganization) return;
+    const res = await fetch(`/api/admin/organizations/${selectedOrganization.id}/plan`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plan: planForm.plan,
+        credits: planForm.credits,
+        status: planForm.status,
+        trial_days: planForm.trialDays,
+        organization_status: planForm.organizationStatus,
+        actor_user_id: localStorage.getItem("userId"),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      notice.error(data.error || "Could not update plan.", "Plan update failed");
+      return;
+    }
+    notice.success(data.message || "Organization plan updated.", "Plan updated");
+    fetchData();
+  };
+
+  const resetData = async () => {
+    const res = await fetch("/api/admin/reset-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reset_type: resetForm.resetType === "test-live" ? "test-live" : resetForm.resetType,
+        environment: resetForm.resetType === "demo" ? "demo" : resetForm.resetType === "production" ? "production" : "test-live",
+        organization_id: resetForm.resetType === "organization" ? resetForm.organizationId : undefined,
+        include_usage_logs: resetForm.includeUsageLogs,
+        include_brain: resetForm.includeBrain,
+        confirmed: resetForm.confirmed,
+        confirmation: resetForm.confirmation,
+        actor_user_id: localStorage.getItem("userId"),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      notice.error(data.error || "Reset failed.", "Reset failed");
+      return;
+    }
+    notice.success("Reset completed. Users, organizations, plans, and settings were kept.", "Reset complete");
+    setSystemHealth(null);
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12">
       {/* Admin Header */}
@@ -405,6 +483,7 @@ export default function AdminConsole() {
             { id: "Usage Logs", icon: Database },
             { id: "API Settings", icon: Zap },
             { id: "Environment", icon: Globe },
+            { id: "Data Management", icon: Database },
             { id: "System Health", icon: Activity },
           ].map((tab) => (
             <button
@@ -835,8 +914,81 @@ export default function AdminConsole() {
               </div>
             )}
 
+            {activeTab === "Organizations" && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {organizations.map((org) => (
+                    <button key={org.id} onClick={() => selectOrganization(org.id)} className={`rounded-2xl border p-5 text-left ${selectedOrgId === org.id ? "border-indigo-400 bg-indigo-50" : "border-slate-100 bg-white"}`}>
+                      <p className="text-sm font-black text-slate-900">{org.name}</p>
+                      <p className="mt-1 text-xs font-bold text-slate-500">Plan: {org.plan || "Trial"} · {org.subscriptionStatus || "TRIAL_ACTIVE"}</p>
+                      <p className="mt-1 text-xs text-slate-400">Credits: {org.aiCredits ?? org.creditsRemaining ?? 100} · Status: {org.status}</p>
+                    </button>
+                  ))}
+                </div>
+                {selectedOrganization && (
+                  <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+                    <h3 className="text-lg font-black text-slate-900">Organization Plan</h3>
+                    <p className="text-xs text-slate-500">Plans are assigned to organizations. Users inherit access through membership and role.</p>
+                    <div className="mt-5 grid grid-cols-1 md:grid-cols-5 gap-3">
+                      <select value={planForm.plan} onChange={(e) => {
+                        const credits = e.target.value === "Trial" ? 100 : e.target.value === "Starter" ? 500 : e.target.value === "Growth" ? 2500 : e.target.value === "Pro" ? 10000 : planForm.credits;
+                        setPlanForm({ ...planForm, plan: e.target.value, credits, status: e.target.value === "Trial" ? "TRIAL_ACTIVE" : "ACTIVE" });
+                      }} className="rounded-xl border-slate-200 text-sm font-bold">
+                        {["Trial", "Starter", "Growth", "Pro", "Enterprise"].map((plan) => <option key={plan}>{plan}</option>)}
+                      </select>
+                      <input type="number" value={planForm.credits} onChange={(e) => setPlanForm({ ...planForm, credits: Number(e.target.value) })} className="rounded-xl border-slate-200 text-sm font-bold" />
+                      <select value={planForm.status} onChange={(e) => setPlanForm({ ...planForm, status: e.target.value })} className="rounded-xl border-slate-200 text-sm font-bold">
+                        <option value="TRIAL_ACTIVE">Trial Active</option>
+                        <option value="ACTIVE">Active</option>
+                        <option value="SUSPENDED">Suspended</option>
+                        <option value="TRIAL_ENDED">Trial Ended</option>
+                      </select>
+                      <input type="number" value={planForm.trialDays} onChange={(e) => setPlanForm({ ...planForm, trialDays: Number(e.target.value) })} className="rounded-xl border-slate-200 text-sm font-bold" placeholder="Trial days" />
+                      <button onClick={updateOrganizationPlan} className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white">Save Plan</button>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <button onClick={() => setPlanForm({ ...planForm, credits: 0 })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600">Reset Credits</button>
+                      <button onClick={() => setPlanForm({ ...planForm, trialDays: planForm.trialDays + 7, status: "TRIAL_ACTIVE" })} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">Extend Trial 7 Days</button>
+                      <button onClick={() => setPlanForm({ ...planForm, status: "SUSPENDED", organizationStatus: "SUSPENDED" })} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">Suspend Organization</button>
+                      <button onClick={() => setPlanForm({ ...planForm, status: "ACTIVE", organizationStatus: "ACTIVE" })} className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700">Activate Organization</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === "Data Management" && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Reset Data</h3>
+                  <p className="text-xs text-slate-500">Use before controlled live testing. Users, organizations, plan templates, Super Admin, and system configuration are kept unless Full Factory Reset is confirmed.</p>
+                </div>
+                <div className="rounded-3xl border border-red-100 bg-red-50 p-6 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <select value={resetForm.resetType} onChange={(e) => setResetForm({ ...resetForm, resetType: e.target.value, confirmation: "", confirmed: false })} className="rounded-xl border-red-200 text-sm font-bold">
+                      <option value="demo">Reset Demo Data Only</option>
+                      <option value="test-live">Reset Test Live Data</option>
+                      <option value="organization">Reset Organization Data</option>
+                      <option value="factory">Full Factory Reset</option>
+                    </select>
+                    <select value={resetForm.organizationId} onChange={(e) => setResetForm({ ...resetForm, organizationId: e.target.value })} disabled={resetForm.resetType !== "organization"} className="rounded-xl border-red-200 text-sm font-bold disabled:opacity-50">
+                      {organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="rounded-2xl bg-white p-4 text-xs font-semibold text-red-800">
+                    Deletes selected leads/contacts, drafts, exports, analytics, uploaded batches, and selected optional logs/context. Keeps users, organizations, subscriptions, plans, and admin accounts.
+                  </div>
+                  <label className="flex items-center gap-3 text-xs font-bold text-red-800"><input type="checkbox" checked={resetForm.includeUsageLogs} onChange={(e) => setResetForm({ ...resetForm, includeUsageLogs: e.target.checked })} /> Also clear usage logs</label>
+                  <label className="flex items-center gap-3 text-xs font-bold text-red-800"><input type="checkbox" checked={resetForm.includeBrain} onChange={(e) => setResetForm({ ...resetForm, includeBrain: e.target.checked })} /> Also clear Brain Center workspace data</label>
+                  <label className="flex items-center gap-3 text-xs font-bold text-red-800"><input type="checkbox" checked={resetForm.confirmed} onChange={(e) => setResetForm({ ...resetForm, confirmed: e.target.checked })} /> I understand what will be deleted and kept</label>
+                  <input value={resetForm.confirmation} onChange={(e) => setResetForm({ ...resetForm, confirmation: e.target.value })} placeholder={resetForm.resetType === "factory" ? "Type RESET ALL DATA" : "Type RESET DATA"} className="w-full rounded-xl border-red-200 text-sm font-bold" />
+                  <button onClick={resetData} className="rounded-xl bg-red-600 px-5 py-3 text-xs font-black uppercase tracking-widest text-white">Final Reset</button>
+                </div>
+              </div>
+            )}
+
             {/* Other tabs remain as placeholders for now */}
-            {activeTab !== "Users" && activeTab !== "Environment" && activeTab !== "System Health" && (
+            {activeTab !== "Users" && activeTab !== "Organizations" && activeTab !== "Environment" && activeTab !== "Data Management" && activeTab !== "System Health" && (
               <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-4">
                  <Settings2 className="h-12 w-12 opacity-20" />
                  <p className="font-bold text-sm italic">The {activeTab} control panel is under maintenance.</p>

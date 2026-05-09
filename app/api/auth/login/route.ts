@@ -74,6 +74,9 @@ export async function POST(request: Request) {
         role: row.membership_role || "VIEWER",
         orgName: org.name || "No Organization",
         orgId: org.id || null,
+        plan: org.plan || "Trial",
+        subscriptionStatus: org.subscriptionStatus || "TRIAL_ACTIVE",
+        aiCredits: org.aiCredits || 0,
       });
     }
 

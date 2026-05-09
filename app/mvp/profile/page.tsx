@@ -16,7 +16,8 @@ import {
   Smartphone,
   Globe,
   Loader2,
-  XCircle
+  XCircle,
+  CreditCard
 } from "lucide-react";
 
 export default function ProfilePage() {
@@ -32,12 +33,15 @@ export default function ProfilePage() {
     status: "ACTIVE",
     lastLogin: "2026-05-06 09:45 AM"
   });
+  const [plan, setPlan] = useState<any>(null);
+  const [storedBilling, setStoredBilling] = useState({ plan: "Trial", credits: "100" });
 
   useEffect(() => {
     const savedName = localStorage.getItem("userName");
     const savedEmail = localStorage.getItem("userEmail");
     const savedRole = localStorage.getItem("userRole");
     const savedOrg = localStorage.getItem("userOrg");
+    setStoredBilling({ plan: localStorage.getItem("userPlan") || "Trial", credits: localStorage.getItem("aiCredits") || "100" });
 
     if (savedName || savedEmail) {
       setUser(prev => ({
@@ -48,6 +52,10 @@ export default function ProfilePage() {
         organization: savedOrg || prev.organization
       }));
     }
+    fetch(`/api/billing/current-plan?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`)
+      .then((response) => response.json())
+      .then(setPlan)
+      .catch(() => {});
   }, []);
 
   const handleUpdatePassword = (e: React.FormEvent) => {
@@ -192,6 +200,25 @@ export default function ProfilePage() {
 
         {/* Right Column: Preferences */}
         <div className="space-y-8">
+          <div className="bg-white rounded-3xl border border-indigo-100 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-indigo-50 bg-indigo-50/50">
+              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Usage & Billing</h2>
+            </div>
+            <div className="p-6 space-y-3">
+              <div className="flex items-center gap-3">
+                <CreditCard className="h-5 w-5 text-indigo-600" />
+                <div>
+                  <p className="text-sm font-black text-slate-900">Plan: {plan?.plan || storedBilling.plan}</p>
+                  <p className="text-xs font-bold text-slate-500">{plan?.subscription_status || "Trial Active"}</p>
+                </div>
+              </div>
+              <p className="text-xs font-semibold text-slate-600">Credits: {plan?.credits_remaining ?? storedBilling.credits} / {plan?.credits_included ?? 100} remaining</p>
+              <p className="text-xs font-semibold text-slate-600">Estimated emails remaining: {plan?.estimated_emails_remaining ?? 10}</p>
+              {plan?.trial_ends_at && <p className="text-xs font-semibold text-slate-600">Trial ends: {new Date(plan.trial_ends_at).toLocaleDateString()}</p>}
+              <button onClick={() => alert("Billing is not connected yet. Contact admin to upgrade.")} className="w-full rounded-xl bg-indigo-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white">Upgrade Plan</button>
+              <button onClick={() => alert("Billing is not connected yet. Contact admin to add credits.")} className="w-full rounded-xl border border-indigo-200 px-4 py-2 text-xs font-black uppercase tracking-widest text-indigo-700">Add Credits</button>
+            </div>
+          </div>
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
               <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Notifications</h2>

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Users, TrendingUp, Mail, CheckCircle, XCircle,
-  AlertTriangle, BarChart2, MessageSquare, Download, ShieldAlert
+  AlertTriangle, BarChart2, MessageSquare, Download, ShieldAlert, CreditCard
 } from "lucide-react";
 
 const stats = [
@@ -32,10 +32,22 @@ const workflowSteps = [
 export default function DashboardPage() {
   const [credits, setCredits] = useState(1832);
   const [role, setRole] = useState<string | null>(null);
+  const [plan, setPlan] = useState<any>(null);
+  const [storedPlan, setStoredPlan] = useState("Trial");
 
   useEffect(() => {
     setRole(localStorage.getItem("userRole"));
-    // In a real app, we would fetch this from the API
+    setStoredPlan(localStorage.getItem("userPlan") || "Trial");
+    fetch(`/api/billing/current-plan?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`)
+      .then((response) => response.json())
+      .then((data) => {
+        setPlan(data);
+        setCredits(Number(data.credits_remaining ?? 0));
+        localStorage.setItem("userPlan", data.plan || "Trial");
+        localStorage.setItem("subscriptionStatus", data.subscription_status || "Trial Active");
+        localStorage.setItem("aiCredits", String(data.credits_remaining ?? 0));
+      })
+      .catch(() => {});
   }, []);
 
   return (
@@ -53,6 +65,10 @@ export default function DashboardPage() {
           <div className="flex flex-col items-end px-4 py-2 bg-slate-950 rounded-xl border border-white/5 shadow-lg">
              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">AI Credits Remaining</span>
              <span className="text-lg font-black text-white">{credits.toLocaleString()}</span>
+          </div>
+          <div className="flex flex-col items-end px-4 py-2 bg-white rounded-xl border border-slate-100 shadow-sm">
+             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Current Plan</span>
+             <span className="text-sm font-black text-slate-900">{plan?.plan || storedPlan}</span>
           </div>
           <div className="hidden sm:flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3 text-[10px] font-bold text-emerald-700 uppercase tracking-widest">
             <ShieldAlert className="h-3.5 w-3.5" />
@@ -76,6 +92,24 @@ export default function DashboardPage() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3">
+            <CreditCard className="mt-0.5 h-5 w-5 text-indigo-600" />
+            <div>
+              <p className="text-sm font-black text-indigo-950">Plan: {plan?.plan || "Trial"} · {plan?.subscription_status || "Trial Active"}</p>
+              <p className="mt-1 text-xs font-semibold text-indigo-700">
+                Credits: {plan?.credits_remaining ?? credits} / {plan?.credits_included ?? 100} remaining · Estimated emails remaining: {plan?.estimated_emails_remaining ?? Math.floor(credits / 10)}
+                {plan?.trial_ends_at ? ` · Trial ends: ${new Date(plan.trial_ends_at).toLocaleDateString()}` : ""}
+              </p>
+            </div>
+          </div>
+          <button onClick={() => alert("Billing is not connected yet. Contact admin to upgrade.")} className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white">
+            Upgrade Plan
+          </button>
+        </div>
       </div>
 
       {/* Metric Grid */}
