@@ -26,6 +26,7 @@ export function Header() {
   const [name, setName] = useState<string | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [envMode, setEnvMode] = useState<"DEMO" | "TEST_LIVE" | "PRODUCTION">("DEMO");
+  const [envLabel, setEnvLabel] = useState("Demo Environment");
   const [plan, setPlan] = useState("Trial");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -45,18 +46,29 @@ export function Header() {
   }, []);
 
   useEffect(() => {
-    const resolveEnvMode = () => {
-      const saved = localStorage.getItem("envConfig");
-      if (saved) return JSON.parse(saved).mode || "DEMO";
-      if (window.location.hostname.includes("test-live")) return "TEST_LIVE";
-      if (window.location.hostname.includes("production")) return "PRODUCTION";
-      return "DEMO";
+    const updateEnv = async () => {
+      try {
+        const orgId = localStorage.getItem("orgId") || "org_demo";
+        const response = await fetch(`/api/environment/status?organization_id=${encodeURIComponent(orgId)}`, { cache: "no-store" });
+        const data = await response.json();
+        setEnvMode(data.mode || "DEMO");
+        setEnvLabel(data.badge_label || "Demo Environment");
+        localStorage.setItem("envConfig", JSON.stringify({
+          ...(JSON.parse(localStorage.getItem("envConfig") || "{}")),
+          mode: data.mode || "DEMO",
+        }));
+      } catch {
+        const saved = localStorage.getItem("envConfig");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setEnvMode(parsed.mode || "DEMO");
+          setEnvLabel(parsed.mode === "TEST_LIVE" ? "Test Live Environment" : parsed.mode === "PRODUCTION" ? "Production Environment" : "Demo Environment");
+        }
+      }
     };
-
-    const updateEnv = () => setEnvMode(resolveEnvMode());
     updateEnv();
     window.addEventListener("storage", updateEnv);
-    const interval = setInterval(updateEnv, 1000);
+    const interval = setInterval(updateEnv, 10000);
     return () => {
       window.removeEventListener("storage", updateEnv);
       clearInterval(interval);
@@ -74,6 +86,24 @@ export function Header() {
       router.push("/mvp"); // Or wherever the client view starts
     } else {
       router.push("/mvp/admin");
+    }
+    setIsProfileOpen(false);
+  };
+
+  const refreshEnvironmentStatus = async () => {
+    try {
+      const orgId = localStorage.getItem("orgId") || "org_demo";
+      const response = await fetch(`/api/environment/status?organization_id=${encodeURIComponent(orgId)}`, { cache: "no-store" });
+      const data = await response.json();
+      setEnvMode(data.mode || "DEMO");
+      setEnvLabel(data.badge_label || "Demo Environment");
+      localStorage.setItem("envConfig", JSON.stringify({
+        ...(JSON.parse(localStorage.getItem("envConfig") || "{}")),
+        mode: data.mode || "DEMO",
+      }));
+      notice.success(`${data.badge_label || "Environment"} refreshed.`, "Environment status");
+    } catch {
+      notice.error("Could not refresh environment status.", "Environment status");
     }
     setIsProfileOpen(false);
   };
@@ -110,7 +140,7 @@ export function Header() {
             return (
               <div className={`hidden md:flex items-center gap-2 px-3 py-1 rounded-full border text-[10px] font-bold uppercase tracking-widest ${badgeStyles[envMode] || badgeStyles.DEMO}`}>
                 <Zap className="h-3 w-3 fill-current" />
-                {labels[envMode] || labels.DEMO}
+                {envLabel || labels[envMode] || labels.DEMO}
               </div>
             );
           })()}
@@ -171,6 +201,12 @@ export function Header() {
                 </div>
 
                 <div className="border-t border-slate-50 p-1.5">
+                  <button
+                    onClick={refreshEnvironmentStatus}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-sm text-slate-600 font-medium hover:bg-slate-50 rounded-xl transition-all"
+                  >
+                    <RefreshCw className="h-4 w-4 text-slate-400" /> Refresh Environment Status
+                  </button>
                   {role === "SUPER_ADMIN" && (
                     <button 
                       onClick={handleSwitchMode}

@@ -135,11 +135,34 @@ export default function AdminConsole() {
     }
   };
 
-  const saveEnvConfig = (config: EnvironmentConfig) => {
+  const saveEnvConfig = async (config: EnvironmentConfig) => {
     setEnvConfig(config);
     localStorage.setItem("envConfig", JSON.stringify(config));
-    setSuccess("Environment configuration updated.");
-    notice.success("Environment configuration updated.", "Environment saved");
+    try {
+      const response = await fetch("/api/environment/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization_id: localStorage.getItem("orgId") || selectedOrgId || "org_demo",
+          user_id: localStorage.getItem("userId") || "user_super_admin",
+          mode: config.mode,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        const syncedConfig = { ...config, mode: data.mode || config.mode };
+        setEnvConfig(syncedConfig);
+        localStorage.setItem("envConfig", JSON.stringify(syncedConfig));
+        setSuccess(`${data.badge_label || "Environment"} saved.`);
+        notice.success(`${data.badge_label || "Environment"} saved.`, "Environment saved");
+      } else {
+        setSuccess("Environment saved locally. Database environment was not updated.");
+        notice.warning(data.message || "Environment saved locally only.", "Environment not persisted");
+      }
+    } catch {
+      setSuccess("Environment saved locally. Backend environment status could not be updated.");
+      notice.warning("Environment saved locally. Backend environment status could not be updated.", "Environment not persisted");
+    }
     setTimeout(() => setSuccess(null), 3000);
   };
 
@@ -150,7 +173,7 @@ export default function AdminConsole() {
     setSystemHealth(data);
   };
 
-  const handleModeSwitch = (newMode: EnvironmentMode) => {
+  const handleModeSwitch = async (newMode: EnvironmentMode) => {
     if (newMode === "PRODUCTION" && !isSuperAdmin) {
       setError("Only Super Admins can transition to Production Mode.");
       notice.error("Only Super Admins can transition to Production Mode.", "Permission blocked");
@@ -184,14 +207,14 @@ export default function AdminConsole() {
       updates.autoSendEnabled = false;
     }
 
-    saveEnvConfig({ ...envConfig, ...updates });
+    await saveEnvConfig({ ...envConfig, ...updates });
     if (newMode !== "DEMO") {
       notice.info(`You are viewing ${newMode === "TEST_LIVE" ? "Test Live" : "Production"} analytics. Demo/Test analytics are stored separately.`, "Environment data switched");
     }
   };
 
-  const confirmProductionMode = () => {
-    saveEnvConfig({
+  const confirmProductionMode = async () => {
+    await saveEnvConfig({
       ...envConfig,
       mode: "PRODUCTION",
       useLiveBrainApi: true,

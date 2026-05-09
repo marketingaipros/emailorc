@@ -58,20 +58,37 @@ export function Sidebar() {
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
   const [envMode, setEnvMode] = useState<"DEMO" | "TEST_LIVE" | "PRODUCTION">("DEMO");
+  const [envLabel, setEnvLabel] = useState("Demo Environment");
 
   useEffect(() => {
     setRole(localStorage.getItem("userRole"));
     setEmail(localStorage.getItem("userEmail"));
     setName(localStorage.getItem("userName"));
 
-    const saved = localStorage.getItem("envConfig");
-    if (saved) {
-      setEnvMode(JSON.parse(saved).mode || "DEMO");
-    } else if (window.location.hostname.includes("test-live")) {
-      setEnvMode("TEST_LIVE");
-    } else if (window.location.hostname.includes("production")) {
-      setEnvMode("PRODUCTION");
-    }
+    const updateEnvironment = async () => {
+      try {
+        const orgId = localStorage.getItem("orgId") || "org_demo";
+        const response = await fetch(`/api/environment/status?organization_id=${encodeURIComponent(orgId)}`, { cache: "no-store" });
+        const data = await response.json();
+        setEnvMode(data.mode || "DEMO");
+        setEnvLabel(data.badge_label || "Demo Environment");
+        localStorage.setItem("envConfig", JSON.stringify({
+          ...(JSON.parse(localStorage.getItem("envConfig") || "{}")),
+          mode: data.mode || "DEMO",
+        }));
+      } catch {
+        const saved = localStorage.getItem("envConfig");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setEnvMode(parsed.mode || "DEMO");
+          setEnvLabel(parsed.mode === "TEST_LIVE" ? "Test Live Environment" : parsed.mode === "PRODUCTION" ? "Production Environment" : "Demo Environment");
+        }
+      }
+    };
+
+    updateEnvironment();
+    const interval = setInterval(updateEnvironment, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleLogout = () => {
@@ -128,7 +145,7 @@ export function Sidebar() {
         <div className="px-4 py-3 mx-3 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl flex items-center gap-2 mt-4">
           <Zap className="h-3.5 w-3.5 text-indigo-400 fill-indigo-400" />
           <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">
-            {envMode === "TEST_LIVE" ? "Test Live Environment" : envMode === "PRODUCTION" ? "Production Environment" : "Demo Environment"}
+            {envLabel || (envMode === "TEST_LIVE" ? "Test Live Environment" : envMode === "PRODUCTION" ? "Production Environment" : "Demo Environment")}
           </span>
         </div>
       )}
