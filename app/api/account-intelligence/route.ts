@@ -8,28 +8,32 @@ function safeKey(value: string | null) {
 }
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const organizationId = safeKey(url.searchParams.get("organization_id")) || "org_demo";
-  const db = await getD1Database();
-  if (!db) return NextResponse.json({ status: "success", items: [] });
+  try {
+    const url = new URL(request.url);
+    const organizationId = safeKey(url.searchParams.get("organization_id")) || "org_demo";
+    const db = await getD1Database();
+    if (!db) return NextResponse.json({ status: "success", items: [] });
 
-  const rows = await db.prepare(`
-    SELECT contact_key, company_key, save_scope, context_json, updated_at
-    FROM account_intelligence
-    WHERE organization_id = ?
-    ORDER BY updated_at DESC
-    LIMIT 500
-  `).bind(organizationId).all();
+    const rows = await db.prepare(`
+      SELECT contact_key, company_key, save_scope, context_json, updated_at
+      FROM account_intelligence
+      WHERE organization_id = ?
+      ORDER BY updated_at DESC
+      LIMIT 500
+    `).bind(organizationId).all();
 
-  const items = (rows.results || []).map((row: any) => ({
-    contact_key: row.contact_key,
-    company_key: row.company_key,
-    save_scope: row.save_scope,
-    context: JSON.parse(row.context_json || "{}"),
-    updated_at: row.updated_at,
-  }));
+    const items = (rows.results || []).map((row: any) => ({
+      contact_key: row.contact_key,
+      company_key: row.company_key,
+      save_scope: row.save_scope,
+      context: JSON.parse(row.context_json || "{}"),
+      updated_at: row.updated_at,
+    }));
 
-  return NextResponse.json({ status: "success", items });
+    return NextResponse.json({ status: "success", items });
+  } catch {
+    return NextResponse.json({ status: "success", items: [], warning: "Account Intelligence database table is not available in this local environment." });
+  }
 }
 
 export async function POST(request: Request) {
