@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createId, getD1Database } from "@/lib/cloudflare-db";
+import { normalizeRole } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -86,8 +87,38 @@ export async function POST(request: Request) {
     const body = await request.json();
     const organizationId = String(body.organization_id || "org_demo");
     const userId = String(body.user_id || "user_super_admin");
+    const email = String(body.email || "");
+    const normalizedRole = normalizeRole(body.role);
     const requestedMode = normalizeMode(body.mode || body.environment);
     const db = await getD1Database();
+    const allowed = requestedMode !== "production" || normalizedRole === "super_admin";
+
+    console.log("environment_transition", {
+      user_id: userId,
+      email,
+      normalized_role: normalizedRole,
+      organization_id: organizationId,
+      requested_environment: requestedMode,
+      allowed,
+      reason: allowed ? "allowed" : "requires_super_admin",
+    });
+
+    if (!allowed) {
+      return NextResponse.json({
+        success: false,
+        code: "permission_denied",
+        message: "Only Super Admins can transition to Production Mode.",
+        permission_debug: {
+          user_id: userId,
+          email,
+          normalized_role: normalizedRole,
+          organization_id: organizationId,
+          requested_environment: requestedMode,
+          allowed,
+          reason: "requires_super_admin",
+        },
+      }, { status: 403 });
+    }
 
     if (!db) {
       return NextResponse.json({
@@ -117,6 +148,14 @@ export async function POST(request: Request) {
       badge_label: MODE_LABELS[refreshed.effectiveEnvironment],
       allowed_features: allowedFeatures(refreshed.effectiveEnvironment),
       message: `${MODE_LABELS[refreshed.effectiveEnvironment]} saved.`,
+      permission_debug: {
+        user_id: userId,
+        email,
+        normalized_role: normalizedRole,
+        organization_id: organizationId,
+        requested_environment: requestedMode,
+        allowed,
+      },
     });
   } catch {
     return NextResponse.json({

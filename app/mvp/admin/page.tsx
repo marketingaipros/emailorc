@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useNotice } from "@/components/notice/NoticeProvider";
+import { normalizeRole, permissionsForRole, roleLabel } from "@/lib/roles";
 
 type AdminTab = "Users" | "Organizations" | "Roles & Permissions" | "Subscription Plans" | "AI Credits" | "Usage Logs" | "API Settings" | "Environment" | "Data Management" | "System Health";
 
@@ -75,6 +76,7 @@ export default function AdminConsole() {
   const [resetForm, setResetForm] = useState({ resetType: "test-live", organizationId: "", includeUsageLogs: false, includeBrain: false, confirmed: false, confirmation: "" });
   
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [permissionDiagnostics, setPermissionDiagnostics] = useState<any>(null);
   const [envConfig, setEnvConfig] = useState<EnvironmentConfig>({
     mode: "DEMO",
     useLiveBrainApi: false,
@@ -87,6 +89,8 @@ export default function AdminConsole() {
     autoSendEnabled: false,
   });
   const [isConfirmingProduction, setIsConfirmingProduction] = useState(false);
+  const [productionConfirmChecked, setProductionConfirmChecked] = useState(false);
+  const [productionConfirmText, setProductionConfirmText] = useState("");
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -118,8 +122,35 @@ export default function AdminConsole() {
 
       // Get current user info from the list for permission checks
       const userEmail = localStorage.getItem("userEmail");
-      const current = usersData.find((u: any) => u.email === userEmail);
-      setCurrentUser(current);
+      const current = usersData.find((u: any) => String(u.email || "").toLowerCase() === String(userEmail || "").toLowerCase());
+      const localRole = localStorage.getItem("userRole");
+      setCurrentUser(current || {
+        id: localStorage.getItem("userId"),
+        email: userEmail,
+        role: localRole,
+        memberships: [{ orgId: localStorage.getItem("orgId") || "org_demo", role: localRole }],
+      });
+
+      fetch(`/api/auth/me?user_id=${encodeURIComponent(localStorage.getItem("userId") || "")}&email=${encodeURIComponent(userEmail || "")}&role=${encodeURIComponent(localRole || "")}&organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`, { cache: "no-store" })
+        .then((response) => response.json())
+        .then((me) => {
+          if (me.error) return;
+          setPermissionDiagnostics(me);
+          localStorage.setItem("userRole", me.role?.toUpperCase?.() || localRole || "VIEWER");
+          setCurrentUser((existing: any) => ({
+            ...(existing || {}),
+            id: me.user_id || existing?.id,
+            email: me.email || existing?.email,
+            role: me.role,
+            roleLabel: me.role_label,
+            memberships: [{
+              orgId: me.organization_id || existing?.memberships?.[0]?.orgId,
+              orgName: me.organization_name || existing?.memberships?.[0]?.orgName,
+              role: me.role,
+            }],
+          }));
+        })
+        .catch(() => {});
       
       const defaultOrgId = current?.memberships?.[0]?.orgId || orgsData[0]?.id || "org_demo";
       if (orgsData.length > 0 && !newUser.organizationId) {
@@ -157,6 +188,8 @@ export default function AdminConsole() {
         body: JSON.stringify({
           organization_id: localStorage.getItem("orgId") || selectedOrgId || "org_demo",
           user_id: localStorage.getItem("userId") || "user_super_admin",
+          email: localStorage.getItem("userEmail") || "",
+          role: normalizeRole(currentUser?.role || localStorage.getItem("userRole")),
           mode: config.mode,
         }),
       });
@@ -186,13 +219,15 @@ export default function AdminConsole() {
   };
 
   const handleModeSwitch = async (newMode: EnvironmentMode) => {
-    if (newMode === "PRODUCTION" && !isSuperAdmin) {
+    if (newMode === "PRODUCTION" && !canTransitionProduction) {
       setError("Only Super Admins can transition to Production Mode.");
       notice.error("Only Super Admins can transition to Production Mode.", "Permission blocked");
       return;
     }
 
-    if (newMode === "PRODUCTION" && isSuperAdmin) {
+    if (newMode === "PRODUCTION" && canTransitionProduction) {
+      setProductionConfirmChecked(false);
+      setProductionConfirmText("");
       setIsConfirmingProduction(true);
       return;
     }
@@ -226,6 +261,10 @@ export default function AdminConsole() {
   };
 
   const confirmProductionMode = async () => {
+    if (!productionConfirmChecked || productionConfirmText.trim().toUpperCase() !== "PRODUCTION") {
+      notice.warning("Check the confirmation box and type PRODUCTION to continue.", "Confirmation required");
+      return;
+    }
     await saveEnvConfig({
       ...envConfig,
       mode: "PRODUCTION",
@@ -242,17 +281,21 @@ export default function AdminConsole() {
   };
 
   useEffect(() => {
-    const role = localStorage.getItem("userRole");
-    if (role !== "SUPER_ADMIN") {
+    const role = normalizeRole(localStorage.getItem("userRole"));
+    if (role !== "super_admin") {
       router.push("/mvp");
       return;
     }
     fetchData();
   }, [router]);
 
-  const isSuperAdmin = currentUser?.role === "SUPER_ADMIN";
-  const isClientAdmin = currentUser?.role === "CLIENT_ADMIN";
+  const normalizedCurrentRole = normalizeRole(permissionDiagnostics?.role || currentUser?.role || localStorage.getItem("userRole"));
+  const rolePermissions = permissionDiagnostics?.permissions || permissionsForRole(normalizedCurrentRole);
+  const isSuperAdmin = normalizedCurrentRole === "super_admin";
+  const canTransitionProduction = Boolean(rolePermissions.canTransitionProduction);
+  const isClientAdmin = normalizedCurrentRole === "client_admin";
   const userOrgId = currentUser?.memberships?.[0]?.orgId;
+  const currentRoleLabel = permissionDiagnostics?.role_label || roleLabel(normalizedCurrentRole);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [userList, setUserList] = useState<any[]>([]);
@@ -887,6 +930,21 @@ export default function AdminConsole() {
                           <CheckCircle2 className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
                           <p className="text-xs font-bold text-red-900 leading-relaxed">I understand real credits will be deducted.</p>
                         </div>
+                        <label className="flex items-start gap-3 rounded-2xl bg-white p-3 border border-red-100">
+                          <input
+                            type="checkbox"
+                            checked={productionConfirmChecked}
+                            onChange={(event) => setProductionConfirmChecked(event.target.checked)}
+                            className="mt-0.5 rounded border-red-300 text-red-600"
+                          />
+                          <span className="text-xs font-bold text-red-900 leading-relaxed">I understand this switches the organization to Production Mode.</span>
+                        </label>
+                        <input
+                          value={productionConfirmText}
+                          onChange={(event) => setProductionConfirmText(event.target.value)}
+                          placeholder="Type PRODUCTION"
+                          className="w-full rounded-2xl border border-red-200 bg-white px-4 py-3 text-sm font-black text-red-900 placeholder:text-red-300 focus:border-red-400 focus:ring-2 focus:ring-red-100"
+                        />
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
@@ -898,7 +956,8 @@ export default function AdminConsole() {
                         </button>
                         <button 
                           onClick={confirmProductionMode}
-                          className="py-4 bg-red-600 text-white font-black rounded-2xl hover:bg-red-700 transition-all shadow-xl shadow-red-200 text-xs uppercase tracking-widest"
+                          disabled={!productionConfirmChecked || productionConfirmText.trim().toUpperCase() !== "PRODUCTION"}
+                          className="py-4 bg-red-600 text-white font-black rounded-2xl hover:bg-red-700 transition-all shadow-xl shadow-red-200 text-xs uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           Confirm Production
                         </button>
@@ -929,6 +988,27 @@ export default function AdminConsole() {
                       <p className="mt-2 text-sm font-black text-slate-900">{value}</p>
                     </div>
                   ))}
+                </div>
+                <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Current user permissions</p>
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {[
+                      ["Email", permissionDiagnostics?.email || currentUser?.email || localStorage.getItem("userEmail") || "Unknown"],
+                      ["User ID", permissionDiagnostics?.user_id || currentUser?.id || localStorage.getItem("userId") || "Unknown"],
+                      ["Display role", currentRoleLabel],
+                      ["Normalized role", normalizedCurrentRole],
+                      ["Organization", permissionDiagnostics?.organization_name || currentUser?.memberships?.[0]?.orgName || localStorage.getItem("userOrg") || "Unknown"],
+                      ["Session source", permissionDiagnostics?.session_source || "local"],
+                      ["Can transition production", canTransitionProduction ? "Yes" : "No"],
+                      ["Can manage users", rolePermissions.canManageUsers ? "Yes" : "No"],
+                      ["Can manage plans", rolePermissions.canManagePlans ? "Yes" : "No"],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl bg-slate-50 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                        <p className="mt-1 text-xs font-black text-slate-900 break-words">{String(value)}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Table counts</p>
