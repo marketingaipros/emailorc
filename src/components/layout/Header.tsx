@@ -25,7 +25,7 @@ export function Header() {
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [envMode, setEnvMode] = useState<"DEMO" | "TEST_LIVE" | "PRODUCTION">("DEMO");
+  const [envMode, setEnvMode] = useState<"DEMO" | "LIVE_TEST" | "TEST_LIVE" | "PRODUCTION">("DEMO");
   const [envLabel, setEnvLabel] = useState("Demo Environment");
   const [plan, setPlan] = useState("Trial");
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -62,7 +62,7 @@ export function Header() {
         if (saved) {
           const parsed = JSON.parse(saved);
           setEnvMode(parsed.mode || "DEMO");
-          setEnvLabel(parsed.mode === "TEST_LIVE" ? "Test Live Environment" : parsed.mode === "PRODUCTION" ? "Production Environment" : "Demo Environment");
+          setEnvLabel(parsed.mode === "LIVE_TEST" ? "Live Test Environment" : parsed.mode === "TEST_LIVE" ? "Test Live Environment" : parsed.mode === "PRODUCTION" ? "Production Environment" : "Demo Environment");
         }
       }
     };
@@ -127,12 +127,14 @@ export function Header() {
           {(() => {
             const badgeStyles: Record<string, string> = {
               DEMO: "bg-indigo-50 border-indigo-100 text-indigo-700",
+              LIVE_TEST: "bg-emerald-50 border-emerald-100 text-emerald-700",
               TEST_LIVE: "bg-amber-50 border-amber-100 text-amber-700",
               PRODUCTION: "bg-red-50 border-red-100 text-red-700"
             };
 
             const labels: Record<string, string> = {
               DEMO: "Demo Environment",
+              LIVE_TEST: "Live Test Environment",
               TEST_LIVE: "Test Live Environment",
               PRODUCTION: "Production Environment"
             };

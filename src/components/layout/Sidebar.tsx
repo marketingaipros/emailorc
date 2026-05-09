@@ -57,7 +57,7 @@ export function Sidebar() {
   const [role, setRole] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
-  const [envMode, setEnvMode] = useState<"DEMO" | "TEST_LIVE" | "PRODUCTION">("DEMO");
+  const [envMode, setEnvMode] = useState<"DEMO" | "LIVE_TEST" | "TEST_LIVE" | "PRODUCTION">("DEMO");
   const [envLabel, setEnvLabel] = useState("Demo Environment");
 
   useEffect(() => {
@@ -81,7 +81,7 @@ export function Sidebar() {
         if (saved) {
           const parsed = JSON.parse(saved);
           setEnvMode(parsed.mode || "DEMO");
-          setEnvLabel(parsed.mode === "TEST_LIVE" ? "Test Live Environment" : parsed.mode === "PRODUCTION" ? "Production Environment" : "Demo Environment");
+          setEnvLabel(parsed.mode === "LIVE_TEST" ? "Live Test Environment" : parsed.mode === "TEST_LIVE" ? "Test Live Environment" : parsed.mode === "PRODUCTION" ? "Production Environment" : "Demo Environment");
         }
       }
     };
@@ -145,7 +145,7 @@ export function Sidebar() {
         <div className="px-4 py-3 mx-3 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl flex items-center gap-2 mt-4">
           <Zap className="h-3.5 w-3.5 text-indigo-400 fill-indigo-400" />
           <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">
-            {envLabel || (envMode === "TEST_LIVE" ? "Test Live Environment" : envMode === "PRODUCTION" ? "Production Environment" : "Demo Environment")}
+            {envLabel || (envMode === "LIVE_TEST" ? "Live Test Environment" : envMode === "TEST_LIVE" ? "Test Live Environment" : envMode === "PRODUCTION" ? "Production Environment" : "Demo Environment")}
           </span>
         </div>
       )}

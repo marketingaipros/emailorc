@@ -138,6 +138,7 @@ function isDnc(value = "") {
 }
 
 function persistDrafts(drafts: any[]) {
+  if (currentEnvironment() !== "demo") return;
   localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
 }
 

@@ -9,6 +9,14 @@ function slugify(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || `org-${Date.now()}`;
 }
 
+function normalizeSignupEnvironment(value: unknown) {
+  const raw = String(value || "").trim().toLowerCase().replaceAll("_", "-");
+  if (raw === "demo") return "demo";
+  if (raw === "production" || raw === "prod" || raw === "live-production") return "production";
+  if (raw === "test-live" || raw === "testlive" || raw === "test") return "test-live";
+  return "live-test";
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -44,6 +52,7 @@ export async function POST(request: Request) {
     const passwordHash = await bcrypt.hash(password, 10);
     const slugBase = slugify(organizationName);
     const slug = `${slugBase}-${orgId.slice(-6)}`;
+    const environment = normalizeSignupEnvironment(body.environment || body.mode || "live-test");
 
     await db.batch([
       db.prepare(`
@@ -53,7 +62,7 @@ export async function POST(request: Request) {
       db.prepare(`
         INSERT INTO organizations (id, name, slug, plan, subscription_status, ai_credits, status, industry, environment, trial_start_date, trial_end_date, credits_used, credits_remaining)
         VALUES (?, ?, ?, 'Trial', 'TRIAL_ACTIVE', ?, 'ACTIVE', ?, ?, ?, ?, 0, ?)
-      `).bind(orgId, organizationName, slug, credits, industry || null, process.env.APP_ENV || "test-live", start, end, credits),
+      `).bind(orgId, organizationName, slug, credits, industry || null, environment, start, end, credits),
       db.prepare(`
         INSERT INTO memberships (id, user_id, organization_id, role, status)
         VALUES (?, ?, ?, 'CLIENT_ADMIN', 'ACTIVE')
@@ -69,7 +78,7 @@ export async function POST(request: Request) {
       db.prepare(`
         INSERT INTO audit_log (id, actor_user_id, organization_id, action, target_type, target_id, metadata)
         VALUES (?, ?, ?, 'SIGNUP_TRIAL_CREATED', 'ORGANIZATION', ?, ?)
-      `).bind(auditId, userId, orgId, orgId, JSON.stringify({ email, plan: "Trial", credits })),
+      `).bind(auditId, userId, orgId, orgId, JSON.stringify({ email, plan: "Trial", credits, environment })),
     ]);
 
     return NextResponse.json({
@@ -87,6 +96,7 @@ export async function POST(request: Request) {
       aiCredits: credits,
       creditsRemaining: credits,
       trialEndsAt: end,
+      environment,
       message: "Trial account created. You have 100 AI Credits available.",
     });
   } catch (error: any) {

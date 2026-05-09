@@ -8,7 +8,7 @@ export async function GET(request: Request) {
     const db = await getD1Database();
     const { searchParams } = new URL(request.url);
     const orgId = searchParams.get("organization_id") || "org_demo";
-    const environment = (searchParams.get("environment") || process.env.APP_ENV || "demo").toLowerCase();
+    const environment = (searchParams.get("environment") || process.env.APP_ENV || "demo").toLowerCase().replaceAll("_", "-");
 
     if (!db) return NextResponse.json({ status: "local", drafts: [] });
 

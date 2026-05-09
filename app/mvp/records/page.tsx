@@ -84,6 +84,10 @@ export default function RecordsPage() {
     }
   }
 
+  function demoDataAllowed() {
+    return activeEnvironment() === "demo";
+  }
+
   useEffect(() => {
     try {
       setAccountContexts(JSON.parse(localStorage.getItem(ACCOUNT_CONTEXT_KEY) || "{}"));
@@ -111,18 +115,20 @@ export default function RecordsPage() {
           setActiveRecordId(loaded[0]?.id || null);
           if (loaded.length) notice.success(`${loaded.length} records loaded from ${data.environment}.`, "Records loaded");
         } else {
-          setRecords(DEMO_RECORDS);
-          setActiveRecordId(DEMO_RECORDS[0]?.id || null);
+          const fallback = demoDataAllowed() ? DEMO_RECORDS : [];
+          setRecords(fallback);
+          setActiveRecordId(fallback[0]?.id || null);
         }
       })
       .catch(() => {
-        setRecords(DEMO_RECORDS);
-        setActiveRecordId(DEMO_RECORDS[0]?.id || null);
+        const fallback = demoDataAllowed() ? DEMO_RECORDS : [];
+        setRecords(fallback);
+        setActiveRecordId(fallback[0]?.id || null);
       })
       .finally(() => setIsLoadingRecords(false));
   }, []);
 
-  const visibleRecords = records.length ? records : DEMO_RECORDS;
+  const visibleRecords = records.length ? records : (demoDataAllowed() ? DEMO_RECORDS : []);
   const filtered = visibleRecords.filter((r) => {
     const matchSearch = r.name.toLowerCase().includes(search.toLowerCase()) ||
       r.company.toLowerCase().includes(search.toLowerCase());

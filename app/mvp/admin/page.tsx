@@ -44,7 +44,7 @@ import { normalizeRole, permissionsForRole, roleLabel } from "@/lib/roles";
 
 type AdminTab = "Users" | "Organizations" | "Roles & Permissions" | "Subscription Plans" | "AI Credits" | "Usage Logs" | "API Settings" | "Environment" | "Data Management" | "System Health";
 
-type EnvironmentMode = "DEMO" | "TEST_LIVE" | "PRODUCTION";
+type EnvironmentMode = "DEMO" | "LIVE_TEST" | "TEST_LIVE" | "PRODUCTION";
 
 interface EnvironmentConfig {
   mode: EnvironmentMode;
@@ -73,7 +73,7 @@ export default function AdminConsole() {
   const [systemHealth, setSystemHealth] = useState<any>(null);
   const [selectedOrgId, setSelectedOrgId] = useState("");
   const [planForm, setPlanForm] = useState({ plan: "Trial", credits: 100, status: "TRIAL_ACTIVE", trialDays: 14, organizationStatus: "ACTIVE" });
-  const [resetForm, setResetForm] = useState({ resetType: "test-live", organizationId: "", includeUsageLogs: false, includeBrain: false, confirmed: false, confirmation: "" });
+  const [resetForm, setResetForm] = useState({ resetType: "live-test", organizationId: "", includeUsageLogs: false, includeBrain: false, confirmed: false, confirmation: "" });
   
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [permissionDiagnostics, setPermissionDiagnostics] = useState<any>(null);
@@ -252,11 +252,20 @@ export default function AdminConsole() {
       updates.databaseType = "TEST";
       updates.exportLabel = "Test Export";
       updates.autoSendEnabled = false;
+    } else if (newMode === "LIVE_TEST") {
+      updates.useLiveBrainApi = true;
+      updates.useFallbackOutputs = false;
+      updates.useSampleData = false;
+      updates.creditMode = "TEST";
+      updates.openRouterKeyType = "TEST";
+      updates.databaseType = "TEST";
+      updates.exportLabel = "Live Test Export";
+      updates.autoSendEnabled = false;
     }
 
     await saveEnvConfig({ ...envConfig, ...updates });
     if (newMode !== "DEMO") {
-      notice.info(`You are viewing ${newMode === "TEST_LIVE" ? "Test Live" : "Production"} analytics. Demo/Test analytics are stored separately.`, "Environment data switched");
+      notice.info(`You are viewing ${newMode === "LIVE_TEST" ? "Live Test" : newMode === "TEST_LIVE" ? "Test Live" : "Production"} analytics. Demo/Test/Live Test/Production analytics are stored separately.`, "Environment data switched");
     }
   };
 
@@ -479,13 +488,18 @@ export default function AdminConsole() {
   };
 
   const resetData = async () => {
+    const resetEnvironment =
+      resetForm.resetType === "demo" ? "demo" :
+      resetForm.resetType === "production" ? "production" :
+      resetForm.resetType === "live-test" ? "live-test" :
+      "test-live";
     const res = await fetch("/api/admin/reset-data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        reset_type: resetForm.resetType === "test-live" ? "test-live" : resetForm.resetType,
-        environment: resetForm.resetType === "demo" ? "demo" : resetForm.resetType === "production" ? "production" : "test-live",
-        organization_id: resetForm.resetType === "organization" ? resetForm.organizationId : undefined,
+        reset_type: resetForm.resetType,
+        environment: resetEnvironment,
+        organization_id: resetForm.resetType === "organization" || resetForm.resetType === "live-test" ? (resetForm.organizationId || localStorage.getItem("orgId") || "org_demo") : undefined,
         include_usage_logs: resetForm.includeUsageLogs,
         include_brain: resetForm.includeBrain,
         confirmed: resetForm.confirmed,
@@ -702,14 +716,15 @@ export default function AdminConsole() {
             {activeTab === "Environment" && (
               <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 {/* Environment Switcher */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {(["DEMO", "TEST_LIVE", "PRODUCTION"] as EnvironmentMode[]).map((m) => (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  {(["DEMO", "LIVE_TEST", "TEST_LIVE", "PRODUCTION"] as EnvironmentMode[]).map((m) => (
                     <button
                       key={m}
                       onClick={() => handleModeSwitch(m)}
                       className={`relative overflow-hidden p-6 rounded-[2.5rem] border-2 transition-all text-left group ${
                         envConfig.mode === m 
                           ? m === "DEMO" ? "border-indigo-500 bg-indigo-50/30" : 
+                            m === "LIVE_TEST" ? "border-emerald-500 bg-emerald-50/30" :
                             m === "TEST_LIVE" ? "border-amber-500 bg-amber-50/30" : 
                             "border-red-500 bg-red-50/30"
                           : "border-slate-100 bg-white hover:border-slate-200"
@@ -718,24 +733,27 @@ export default function AdminConsole() {
                       <div className="flex items-center justify-between mb-4">
                          <div className={`p-3 rounded-2xl ${
                            m === "DEMO" ? "bg-indigo-100 text-indigo-600" : 
+                           m === "LIVE_TEST" ? "bg-emerald-100 text-emerald-600" :
                            m === "TEST_LIVE" ? "bg-amber-100 text-amber-600" : 
                            "bg-red-100 text-red-600"
                          }`}>
-                           {m === "DEMO" ? <Zap className="h-6 w-6" /> : m === "TEST_LIVE" ? <Cpu className="h-6 w-6" /> : <Globe className="h-6 w-6" />}
+                           {m === "DEMO" ? <Zap className="h-6 w-6" /> : m === "LIVE_TEST" ? <Activity className="h-6 w-6" /> : m === "TEST_LIVE" ? <Cpu className="h-6 w-6" /> : <Globe className="h-6 w-6" />}
                          </div>
                          {envConfig.mode === m && (
                            <CheckCircle2 className={`h-6 w-6 ${
                              m === "DEMO" ? "text-indigo-500" : 
+                             m === "LIVE_TEST" ? "text-emerald-500" :
                              m === "TEST_LIVE" ? "text-amber-500" : 
                              "text-red-500"
                            }`} />
                          )}
                       </div>
                       <h3 className="font-black text-slate-900 text-lg uppercase tracking-tight">
-                        {m === "DEMO" ? "Demo Mode" : m === "TEST_LIVE" ? "Test Live" : "Production"}
+                        {m === "DEMO" ? "Demo Mode" : m === "LIVE_TEST" ? "Live Test" : m === "TEST_LIVE" ? "Test Live" : "Production"}
                       </h3>
                       <p className="text-xs text-slate-500 mt-1 font-medium leading-relaxed">
                         {m === "DEMO" ? "Sample data and fallback outputs for safe exploration." : 
+                         m === "LIVE_TEST" ? "Clean user-created data, live model calls, export testing only." :
                          m === "TEST_LIVE" ? "Live API usage with sanitized real data for QA validation." : 
                          "Full enterprise capacity with real client records and delivery."}
                       </p>
@@ -973,7 +991,7 @@ export default function AdminConsole() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-lg font-black text-slate-900">Database & Environment Health</h3>
-                    <p className="text-xs text-slate-500">Counts are separated by the active environment so Demo, Test Live, and Production analytics do not overwrite each other.</p>
+                    <p className="text-xs text-slate-500">Counts are separated by the active environment so Demo, Live Test, Test Live, and Production analytics do not overwrite each other.</p>
                   </div>
                   <button onClick={loadSystemHealth} className="rounded-xl bg-slate-950 px-4 py-2 text-xs font-black uppercase tracking-widest text-white">Refresh</button>
                 </div>
@@ -1023,7 +1041,7 @@ export default function AdminConsole() {
                 </div>
                 {envConfig.mode !== "DEMO" && (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-                    You are viewing {envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production"} analytics. Demo/Test/Production analytics are stored separately.
+                    You are viewing {envConfig.mode === "LIVE_TEST" ? "Live Test" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production"} analytics. Demo/Live Test/Test/Production analytics are stored separately.
                   </div>
                 )}
               </div>
@@ -1082,11 +1100,12 @@ export default function AdminConsole() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <select value={resetForm.resetType} onChange={(e) => setResetForm({ ...resetForm, resetType: e.target.value, confirmation: "", confirmed: false })} className="rounded-xl border-red-200 text-sm font-bold">
                       <option value="demo">Reset Demo Data Only</option>
+                      <option value="live-test">Reset Live Test Data</option>
                       <option value="test-live">Reset Test Live Data</option>
                       <option value="organization">Reset Organization Data</option>
                       <option value="factory">Full Factory Reset</option>
                     </select>
-                    <select value={resetForm.organizationId} onChange={(e) => setResetForm({ ...resetForm, organizationId: e.target.value })} disabled={resetForm.resetType !== "organization"} className="rounded-xl border-red-200 text-sm font-bold disabled:opacity-50">
+                    <select value={resetForm.organizationId} onChange={(e) => setResetForm({ ...resetForm, organizationId: e.target.value })} disabled={resetForm.resetType !== "organization" && resetForm.resetType !== "live-test"} className="rounded-xl border-red-200 text-sm font-bold disabled:opacity-50">
                       {organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
                     </select>
                   </div>
@@ -1096,7 +1115,7 @@ export default function AdminConsole() {
                   <label className="flex items-center gap-3 text-xs font-bold text-red-800"><input type="checkbox" checked={resetForm.includeUsageLogs} onChange={(e) => setResetForm({ ...resetForm, includeUsageLogs: e.target.checked })} /> Also clear usage logs</label>
                   <label className="flex items-center gap-3 text-xs font-bold text-red-800"><input type="checkbox" checked={resetForm.includeBrain} onChange={(e) => setResetForm({ ...resetForm, includeBrain: e.target.checked })} /> Also clear Brain Center workspace data</label>
                   <label className="flex items-center gap-3 text-xs font-bold text-red-800"><input type="checkbox" checked={resetForm.confirmed} onChange={(e) => setResetForm({ ...resetForm, confirmed: e.target.checked })} /> I understand what will be deleted and kept</label>
-                  <input value={resetForm.confirmation} onChange={(e) => setResetForm({ ...resetForm, confirmation: e.target.value })} placeholder={resetForm.resetType === "factory" ? "Type RESET ALL DATA" : "Type RESET DATA"} className="w-full rounded-xl border-red-200 text-sm font-bold" />
+                  <input value={resetForm.confirmation} onChange={(e) => setResetForm({ ...resetForm, confirmation: e.target.value })} placeholder={resetForm.resetType === "factory" ? "Type RESET ALL DATA" : resetForm.resetType === "live-test" ? "Type RESET LIVE TEST" : "Type RESET DATA"} className="w-full rounded-xl border-red-200 text-sm font-bold" />
                   <button onClick={resetData} className="rounded-xl bg-red-600 px-5 py-3 text-xs font-black uppercase tracking-widest text-white">Final Reset</button>
                 </div>
               </div>

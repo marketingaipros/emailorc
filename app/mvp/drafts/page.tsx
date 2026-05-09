@@ -113,7 +113,7 @@ const DEMO_DRAFTS: Draft[] = [
 
 export default function DraftsPage() {
   const notice = useNotice();
-  const [drafts, setDrafts] = useState<Draft[]>(DEMO_DRAFTS);
+  const [drafts, setDrafts] = useState<Draft[]>([]);
   const [activeSubject, setActiveSubject] = useState<Record<string, 1 | 2>>({});
   const [regeneratingId, setRegeneratingId] = useState<number | string | null>(null);
   const [offers, setOffers] = useState<OfferItem[]>(DEFAULT_OFFERS);
@@ -129,6 +129,19 @@ export default function DraftsPage() {
 
   function companyKey(draft: Draft) {
     return String(draft.company || "").trim().toLowerCase();
+  }
+
+  function currentEnvironment() {
+    try {
+      const envConfig = JSON.parse(localStorage.getItem("envConfig") || "{}");
+      return String(envConfig.mode || "demo").toLowerCase().replace("_", "-");
+    } catch {
+      return "demo";
+    }
+  }
+
+  function demoDataAllowed() {
+    return currentEnvironment() === "demo";
   }
 
   function persistAccountContextRemote(draft: Draft, context: ManualAccountContext) {
@@ -244,15 +257,18 @@ export default function DraftsPage() {
         });
       })
       .catch(() => {});
-    const envConfig = JSON.parse(localStorage.getItem("envConfig") || "{}");
-    fetch(`/api/workflow/drafts?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}&environment=${encodeURIComponent(String(envConfig.mode || "demo").toLowerCase().replace("_", "-"))}`)
+    const environment = currentEnvironment();
+    if (!demoDataAllowed()) setDrafts([]);
+    fetch(`/api/workflow/drafts?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}&environment=${encodeURIComponent(environment)}`)
       .then((response) => response.json())
       .then((data) => {
-        if (data.status === "success" && data.drafts?.length) {
-          setDrafts(data.drafts);
+        if (data.status === "success") {
+          setDrafts(data.drafts || []);
         }
       })
       .catch(() => {});
+
+    if (!demoDataAllowed()) return;
 
     const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
     const savedState = localStorage.getItem(DRAFT_STATE_KEY);
@@ -298,7 +314,7 @@ export default function DraftsPage() {
         .map((draft: Draft) => ({ ...draft, ...(stateById[String(draft.id)] || {}) }));
       setDrafts(mergedUploaded.length ? mergedUploaded : demoDrafts);
     } catch {
-      setDrafts(DEMO_DRAFTS);
+      setDrafts(demoDataAllowed() ? DEMO_DRAFTS : []);
     }
   }, []);
 

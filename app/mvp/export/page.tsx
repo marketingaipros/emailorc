@@ -57,6 +57,10 @@ function normalizeEnvironment() {
   return String(envConfig.mode || "demo").toLowerCase().replace("_", "-");
 }
 
+function demoDataAllowed() {
+  return normalizeEnvironment() === "demo";
+}
+
 function contextKeyForDraft(draft: ExportDraft) {
   return String(draft.email || draft.company || draft.id).trim().toLowerCase();
 }
@@ -134,9 +138,19 @@ export default function ExportCenterPage() {
 
   useEffect(() => {
     setRole(localStorage.getItem("userRole") || "VIEWER");
-    const localDrafts = loadLocalDrafts();
+    const localDrafts = demoDataAllowed() ? loadLocalDrafts() : [];
     setDrafts(localDrafts);
     setSelectedDraftId(localDrafts[0]?.id || "");
+
+    fetch(`/api/workflow/drafts?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}&environment=${encodeURIComponent(normalizeEnvironment())}`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status !== "success") return;
+        const remoteDrafts = (data.drafts || []).map(normalizeDraft);
+        setDrafts(remoteDrafts);
+        setSelectedDraftId(remoteDrafts[0]?.id || "");
+      })
+      .catch(() => {});
 
     fetch(`/api/billing/current-plan?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`)
       .then((res) => res.json())

@@ -4,7 +4,7 @@ import { createId, getD1Database } from "@/lib/cloudflare-db";
 export const dynamic = "force-dynamic";
 
 function envName(input?: string) {
-  return String(input || process.env.APP_ENV || "demo").toLowerCase();
+  return String(input || process.env.APP_ENV || "demo").toLowerCase().replaceAll("_", "-");
 }
 
 export async function POST(request: Request) {

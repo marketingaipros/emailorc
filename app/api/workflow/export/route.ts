@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const orgId = body.organization_id || "org_demo";
   const userId = body.user_id || "user_super_admin";
-  const environment = String(body.environment || process.env.APP_ENV || "demo").toLowerCase();
+  const environment = String(body.environment || process.env.APP_ENV || "demo").toLowerCase().replaceAll("_", "-");
   const format = body.format || "CSV";
 
   if (!db) return NextResponse.json({ status: "local", rows: [], export_batch_id: createId("export") });

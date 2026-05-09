@@ -413,7 +413,7 @@ export default function BrainCenterPage() {
   const [isIndexingKnowledge, setIsIndexingKnowledge] = useState<string | null>(null);
   const [embeddingIndexStatus, setEmbeddingIndexStatus] = useState<Record<string, any>>({});
 
-  const environmentName = envConfig.mode === "DEMO" ? "Demo" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production";
+  const environmentName = envConfig.mode === "DEMO" ? "Demo" : envConfig.mode === "LIVE_TEST" ? "Live Test" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production";
   const orgId = typeof window !== "undefined" ? localStorage.getItem("orgId") : null;
   const userId = typeof window !== "undefined" ? localStorage.getItem("userId") : null;
   const modelOptions = openRouterModels.length
@@ -2344,7 +2344,7 @@ export default function BrainCenterPage() {
                           </div>
                           <div className="flex justify-between text-xs">
                             <span className="text-slate-500">Environment:</span>
-                            <span className="font-bold text-indigo-600">{envConfig.mode === "DEMO" ? "Demo" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production"}</span>
+                            <span className="font-bold text-indigo-600">{envConfig.mode === "DEMO" ? "Demo" : envConfig.mode === "LIVE_TEST" ? "Live Test" : envConfig.mode === "TEST_LIVE" ? "Test Live" : "Production"}</span>
                           </div>
                           <div className="flex justify-between text-xs">
                             <span className="text-slate-500">Key Source:</span>

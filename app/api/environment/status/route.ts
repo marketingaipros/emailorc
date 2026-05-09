@@ -4,10 +4,11 @@ import { normalizeRole } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
-type EnvironmentMode = "demo" | "test-live" | "production";
+type EnvironmentMode = "demo" | "live-test" | "test-live" | "production";
 
 const MODE_LABELS: Record<EnvironmentMode, string> = {
   demo: "Demo Environment",
+  "live-test": "Live Test Environment",
   "test-live": "Test Live Environment",
   production: "Production Environment",
 };
@@ -15,24 +16,34 @@ const MODE_LABELS: Record<EnvironmentMode, string> = {
 function normalizeMode(value: unknown): EnvironmentMode {
   const raw = String(value || "").trim().toLowerCase().replaceAll("_", "-");
   if (raw === "prod" || raw === "live" || raw === "live-production") return "production";
+  if (raw === "livetest" || raw === "live-test" || raw === "live-test-mode") return "live-test";
   if (raw === "test" || raw === "testlive" || raw === "cloudflare-test") return "test-live";
   if (raw === "cloudflare-demo" || raw === "preview" || raw === "development") return "demo";
-  if (raw === "production" || raw === "test-live" || raw === "demo") return raw;
+  if (raw === "production" || raw === "live-test" || raw === "test-live" || raw === "demo") return raw;
   return "demo";
 }
 
 function toUiMode(mode: EnvironmentMode) {
+  if (mode === "live-test") return "LIVE_TEST";
   return mode === "test-live" ? "TEST_LIVE" : mode.toUpperCase();
 }
 
 function allowedFeatures(mode: EnvironmentMode) {
+  const isDemo = mode === "demo";
   return {
     upload_contacts: true,
     generate_drafts: true,
     export_approved_drafts: true,
-    live_brain_api: mode !== "demo",
-    sample_data: mode === "demo",
+    live_brain_api: !isDemo,
+    sample_data: isDemo,
+    demo_data_enabled: isDemo,
+    fallback_outputs_enabled: isDemo,
+    live_model_enabled: !isDemo,
+    export_enabled: true,
+    crm_integrations_enabled: false,
+    email_integrations_enabled: false,
     auto_send: false,
+    auto_send_enabled: false,
     human_approval_required: true,
   };
 }
@@ -77,6 +88,11 @@ export async function GET(request: Request) {
     mode: toUiMode(effectiveEnvironment),
     badge_label: MODE_LABELS[effectiveEnvironment],
     allowed_features: allowedFeatures(effectiveEnvironment),
+    demo_data_enabled: effectiveEnvironment === "demo",
+    fallback_outputs_enabled: effectiveEnvironment === "demo",
+    live_model_enabled: effectiveEnvironment !== "demo",
+    auto_send_enabled: false,
+    human_approval_required: true,
     source_of_truth: db ? "organization.database.environment" : "app.environment.fallback",
     last_checked_at: new Date().toISOString(),
   });
@@ -147,6 +163,11 @@ export async function POST(request: Request) {
       mode: toUiMode(refreshed.effectiveEnvironment),
       badge_label: MODE_LABELS[refreshed.effectiveEnvironment],
       allowed_features: allowedFeatures(refreshed.effectiveEnvironment),
+      demo_data_enabled: refreshed.effectiveEnvironment === "demo",
+      fallback_outputs_enabled: refreshed.effectiveEnvironment === "demo",
+      live_model_enabled: refreshed.effectiveEnvironment !== "demo",
+      auto_send_enabled: false,
+      human_approval_required: true,
       message: `${MODE_LABELS[refreshed.effectiveEnvironment]} saved.`,
       permission_debug: {
         user_id: userId,
