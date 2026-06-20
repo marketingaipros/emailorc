@@ -7,3 +7,5 @@ playwright-report
 test-results
 .open-next
 .wrangler
+.DS_Store
+prisma/dev.db
