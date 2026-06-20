@@ -10,6 +10,14 @@
 | Token refresh or storage may require schema support. | Medium | Medium | Inspect existing D1 tables/migrations first; add a minimal next-numbered migration only if required. | Open |
 | Sprint 052 migration text is mistaken for an applied D1 migration. | Medium | High | Keep `0011_microsoft_outlook_drafts.sql` documented as migration text only until an approved D1 step applies it. | Active |
 | Existing session migration remains unapplied in D1. | High | Medium | Do not apply migrations in Sprint 052; document whether the connection flow can be tested locally without it. | Open |
+| Local session cookies may behave differently under Wrangler preview than under another local runtime. | Medium | Medium | Sprint 053 changed Secure cookie behavior to follow request protocol and validated login/connect under local Wrangler. | Closed |
+| The initial local user may be in the wrong organization or lack a usable membership/role. | Medium | High | Sprint 053 added demo-only Super Admin bootstrap when the documented local Super Admin is absent. | Closed |
+| Super Admin role-save failure could be a guard, UI payload mismatch, or missing D1 state. | Medium | Medium | Sprint 053 validated same-org role update and canonical `client_admin` persistence. | Closed |
+| Role fixes could weaken cross-organization protection. | Low | High | Sprint 053-A rejects cross-org admin user updates and keeps same-org authorization tests. | Closed |
+| A Microsoft OAuth redirect/configuration error is mistaken for an EmailORC session error. | Medium | Medium | Sprint 053 acceptance distinguishes valid-session reachability from actual Microsoft OAuth UAT. | Active |
+| Demo Super Admin bootstrap runs against remote/deployed demo D1. | Medium | High | Sprint 053-A requires `APP_ENV=demo` and a local request host; non-local hosts default blocked. Remote D1 was not touched. | Monitoring |
+| Final Super Admin access is removed by self-demotion, deactivation, or archive. | Medium | High | Sprint 053-A blocks final active Super Admin demotion, deactivation, and archive/delete paths. | Closed |
+| Admin user update crosses organization boundaries unintentionally. | Medium | High | Sprint 053-A enforces current-organization membership lookup and rejects cross-org create/update attempts. | Closed |
 | Outlook work could expand into Copilot or CRM work. | Medium | Medium | Keep Copilot, Salesforce, ColdFusion, and CRM scope explicitly excluded. | Active |
 | App is mistaken for production-ready after Brain/provider guard work. | Medium | High | Continue documenting EmailORC as MVP/demo-stage until full production readiness is validated. | Open |
 | Sprint 015 expands into broad auth hardening. | Medium | High | Scope stayed limited to approved Brain/provider API routes, a small Brain auth helper, focused tests, and closeout docs/planning. | Closed |

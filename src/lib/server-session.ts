@@ -30,6 +30,11 @@ function isProductionRuntime() {
   return process.env.NODE_ENV === "production";
 }
 
+function shouldUseSecureCookie(request?: Request) {
+  if (request) return new URL(request.url).protocol === "https:";
+  return isProductionRuntime();
+}
+
 function expiresAtFromNow() {
   return new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000).toISOString();
 }
@@ -50,21 +55,21 @@ export function readSessionToken(request: Request) {
   return decodeURIComponent(match.slice(SESSION_COOKIE_NAME.length + 1));
 }
 
-export function setSessionCookie(response: NextResponse, token: string) {
+export function setSessionCookie(response: NextResponse, token: string, request?: Request) {
   response.cookies.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: isProductionRuntime(),
+    secure: shouldUseSecureCookie(request),
     path: "/",
     maxAge: SESSION_MAX_AGE_SECONDS,
   });
 }
 
-export function clearSessionCookie(response: NextResponse) {
+export function clearSessionCookie(response: NextResponse, request?: Request) {
   response.cookies.set(SESSION_COOKIE_NAME, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: isProductionRuntime(),
+    secure: shouldUseSecureCookie(request),
     path: "/",
     maxAge: 0,
   });

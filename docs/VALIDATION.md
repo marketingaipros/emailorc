@@ -158,8 +158,56 @@ Manual mailbox validation remains blocked until Microsoft Entra app registration
 
 ## Future Validation Areas
 
+- Sprint 053 local auth/session validation:
+  - local login under `npm run preview`
+  - `/api/auth/me` recognizes the server session
+  - valid session reaches `/api/integrations/microsoft/connect` without immediate unauthenticated JSON
+  - logged-out connect path remains blocked
+  - Super Admin can save allowed same-org role updates
+  - unauthorized and cross-org role changes remain blocked
+  - no session token, password, secret, or Microsoft credential appears in responses, logs, docs, or tests
 - Billing/usage/account API guard validation.
 - Page/middleware/localStorage cleanup validation.
 - Production session storage and D1 `app_sessions` migration application validation.
 - Production-readiness validation.
 - Provider key redaction and secret-handling validation.
+
+---
+
+## Sprint 053 Validation Results
+
+Sprint 053 validation passed on 2026-06-20:
+
+| Command / Check | Result | Notes |
+|---|---|---|
+| `npm run test` | Passed | 52 tests passed. |
+| `npm run lint` | Passed | Existing React hook dependency warnings remain. |
+| `npm run test:e2e:safe` | Passed | 2 non-mutating Playwright tests passed. |
+| `npm run build` | Passed | Existing React hook dependency warnings remain. |
+| `npm run preview` | Passed | Local Wrangler server started on `http://localhost:8788`. |
+| Local Super Admin login | Passed | `admin@demo.com` returned `200` under preview. |
+| `/api/auth/me` | Passed | Returned `super_admin`, `org_demo`, `d1_app_sessions`. |
+| `/api/integrations/microsoft/connect` authenticated | Passed | Returned `307`, not `Authentication required.` |
+| `/api/integrations/microsoft/connect` logged out | Passed | Returned `401`. |
+| Same-org role update | Passed | Super Admin role update returned `200` and persisted `client_admin`. |
+
+## Sprint 053-A Validation Results
+
+Sprint 053-A validation passed on 2026-06-20:
+
+| Command / Check | Result | Notes |
+|---|---|---|
+| `npm run test` | Passed | 52 tests passed, including local bootstrap, cookie, canonical-role, same-org, cross-org, and final-Super-Admin guard helpers. |
+| `npm run lint` | Passed | Existing React hook dependency warnings remain. |
+| `npm run test:e2e:safe` | Passed | 2 non-mutating Playwright tests passed. |
+| `npm run build` | Passed | Existing React hook dependency warnings remain. |
+| `npm run preview` | Passed | Local Wrangler server started on `http://localhost:8789`. |
+| Local Super Admin login | Passed | `admin@demo.com` returned `200`. |
+| `/api/auth/me` | Passed | Returned `super_admin`, `org_demo`, `d1_app_sessions`. |
+| Authenticated Microsoft connect | Passed | Returned `307`, not `Authentication required.` |
+| Logged-out Microsoft connect | Passed | Returned `401`. |
+| Same-org role update | Passed | Returned `200` and persisted canonical `client_admin`. |
+| Cross-org role update | Passed | Returned `403`. |
+| Final Super Admin self-demotion | Passed | Returned `403`. |
+| Final Super Admin self-deactivation | Passed | Returned `403`. |
+| Final Super Admin archive/delete | Passed | Returned `403`. |

@@ -1,11 +1,40 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getD1Database, mapD1Organization, mapD1User } from "@/lib/cloudflare-db";
+import { createId, getD1Database, mapD1Organization, mapD1User } from "@/lib/cloudflare-db";
 import { createServerSession, setSessionCookie } from "@/lib/server-session";
 import { normalizeRole } from "@/lib/roles";
+import { shouldBootstrapDemoSuperAdmin } from "@/lib/local-runtime";
 import * as bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
+
+const DEMO_SUPER_ADMIN_EMAIL = "admin@demo.com";
+const DEMO_SUPER_ADMIN_HASH = "$2b$10$h1hYD75gEdS/96Dy0YZwDO8EEwEFs5mtSBFid44qxHt6KJo9cpQ9.";
+
+async function bootstrapDemoSuperAdminIfMissing(db: D1Database, request: Request, email: string, password: string) {
+  if (!await shouldBootstrapDemoSuperAdmin({
+    request,
+    email,
+    password,
+    expectedEmail: DEMO_SUPER_ADMIN_EMAIL,
+    comparePassword: (input) => bcrypt.compare(input, DEMO_SUPER_ADMIN_HASH),
+  })) return false;
+  await db.batch([
+    db.prepare(`
+      INSERT OR IGNORE INTO organizations (id, name, slug, plan, subscription_status, ai_credits, status)
+      VALUES ('org_demo', 'Demo Organization', 'demo-org', 'GROWTH', 'ACTIVE', 10000, 'ACTIVE')
+    `),
+    db.prepare(`
+      INSERT OR IGNORE INTO users (id, email, first_name, last_name, job_title, password_hash, status)
+      VALUES ('user_super_admin', ?, 'Super', 'Admin', 'Platform Owner', ?, 'ACTIVE')
+    `).bind(DEMO_SUPER_ADMIN_EMAIL, DEMO_SUPER_ADMIN_HASH),
+    db.prepare(`
+      INSERT OR IGNORE INTO memberships (id, user_id, organization_id, role, status)
+      VALUES (?, 'user_super_admin', 'org_demo', 'super_admin', 'ACTIVE')
+    `).bind(createId("membership")),
+  ]);
+  return true;
+}
 
 export async function POST(request: Request) {
   try {
@@ -17,7 +46,7 @@ export async function POST(request: Request) {
 
     const db = await getD1Database();
     if (db) {
-      const row = await db.prepare(`
+      let row = await db.prepare(`
         SELECT
           u.*,
           m.role AS membership_role,
@@ -36,6 +65,28 @@ export async function POST(request: Request) {
         WHERE u.email = ?
         LIMIT 1
       `).bind(email).first();
+
+      if (!row && await bootstrapDemoSuperAdminIfMissing(db, request, email, password)) {
+        row = await db.prepare(`
+          SELECT
+            u.*,
+            m.role AS membership_role,
+            o.id AS org_id,
+            o.name AS org_name,
+            o.slug AS org_slug,
+            o.plan AS org_plan,
+            o.subscription_status,
+            o.ai_credits,
+            o.status AS org_status,
+            o.created_at AS org_created_at,
+            o.updated_at AS org_updated_at
+          FROM users u
+          LEFT JOIN memberships m ON m.user_id = u.id AND m.status = 'ACTIVE'
+          LEFT JOIN organizations o ON o.id = m.organization_id
+          WHERE u.email = ?
+          LIMIT 1
+        `).bind(email).first();
+      }
 
       if (!row || !row.password_hash) {
         return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
@@ -96,7 +147,7 @@ export async function POST(request: Request) {
         role,
         environmentMode: null,
       });
-      setSessionCookie(response, session.token);
+      setSessionCookie(response, session.token, request);
       return response;
     }
 
@@ -155,7 +206,7 @@ export async function POST(request: Request) {
       role,
       environmentMode: null,
     });
-    setSessionCookie(response, session.token);
+    setSessionCookie(response, session.token, request);
     return response;
   } catch (error) {
     console.error("Login error:", error);

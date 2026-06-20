@@ -5,6 +5,7 @@ import * as bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 import { createInviteForD1 } from "../../../../src/lib/admin/invite-service";
 import { requireSuperAdmin } from "../../../../src/lib/admin-auth";
+import { normalizeAssignableUserRole } from "../../../../src/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -125,8 +126,15 @@ export async function POST(request: Request) {
     } = body;
 
     // Validation
+    const normalizedRole = normalizeAssignableUserRole(role);
     if (!email || !organizationId || !role) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+    if (!normalizedRole) {
+      return NextResponse.json({ error: "User role is not recognized." }, { status: 403 });
+    }
+    if (!admin.currentUser.organizationId || organizationId !== admin.currentUser.organizationId) {
+      return NextResponse.json({ error: "Cross-organization user updates are not allowed." }, { status: 403 });
     }
 
     const db = await getD1Database();
@@ -150,11 +158,11 @@ export async function POST(request: Request) {
         db.prepare(`
           INSERT INTO memberships (id, user_id, organization_id, role, status)
           VALUES (?, ?, ?, ?, 'ACTIVE')
-        `).bind(membershipId, userId, organizationId, role),
+        `).bind(membershipId, userId, organizationId, normalizedRole),
         db.prepare(`
           INSERT INTO audit_log (id, action, target_type, target_id, metadata)
           VALUES (?, 'PROVISION_USER', 'USER', ?, ?)
-        `).bind(auditId, userId, JSON.stringify({ email, role, organizationId })),
+        `).bind(auditId, userId, JSON.stringify({ email, role: normalizedRole, organizationId })),
       ];
 
       await db.batch(statements);
@@ -209,11 +217,11 @@ export async function POST(request: Request) {
       // Create Membership
       await tx.membership.create({
         data: {
-          userId: newUser.id,
-          organizationId,
-          role,
-          status: "ACTIVE",
-        },
+            userId: newUser.id,
+            organizationId,
+            role: normalizedRole,
+            status: "ACTIVE",
+          },
       });
 
       // Handle Invite if requested
@@ -222,7 +230,7 @@ export async function POST(request: Request) {
           data: {
             email,
             organizationId,
-            role,
+            role: normalizedRole,
             inviteToken: randomUUID(),
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
             status: "PENDING",
@@ -236,7 +244,7 @@ export async function POST(request: Request) {
           action: "PROVISION_USER",
           targetType: "USER",
           targetId: newUser.id,
-          metadata: JSON.stringify({ email, role, organizationId }),
+          metadata: JSON.stringify({ email, role: normalizedRole, organizationId }),
         },
       });
 

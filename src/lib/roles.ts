@@ -42,6 +42,12 @@ export function isRecognizedRole(role: unknown) {
   return normalizeRole(role) !== null;
 }
 
+export function normalizeAssignableUserRole(role: unknown) {
+  const normalized = normalizeRole(role);
+  if (!normalized || normalized === "user" || normalized === "demo_user") return null;
+  return normalized;
+}
+
 export function isSensitiveRoleAllowed(role: unknown, allowedRoles: NormalizedRole[]) {
   const normalized = normalizeRole(role);
   if (!normalized) return false;

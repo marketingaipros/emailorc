@@ -1,14 +1,18 @@
 # Project State
 
 **Project:** EmailORC
-**Last updated:** 2026-06-19
-**Current phase:** Sprint 052 IMPLEMENTED — awaiting Entra configuration, D1 migration application, and Outlook mailbox UAT
+**Last updated:** 2026-06-20
+**Current phase:** Sprint 053-A IMPLEMENTED - local bootstrap and admin guard hardening validated
 
 ---
 
 ## Current Status
 
-Sprint 052 status: IMPLEMENTED — awaiting Entra configuration, D1 migration application, and Outlook mailbox UAT.
+Sprint 053 status: IMPLEMENTED - local auth/session and Super Admin role-save fix complete.
+
+Sprint 053-A status: IMPLEMENTED - local bootstrap and admin guard hardening validated; not committed.
+
+Sprint 052 status remains: IMPLEMENTED — awaiting Entra configuration, D1 migration application, and Outlook mailbox UAT.
 
 Goal:
 
@@ -19,6 +23,12 @@ Goal:
 
 Current status:
 
+- Local Outlook Draft testing is blocked before Microsoft OAuth begins because `/api/integrations/microsoft/connect` returned `Authentication required.` under local Wrangler testing.
+- The user also reported Super Admin user-role updates would not save and a locally created user was assigned `client_admin`, creating uncertainty about local role/session setup.
+- Sprint 053 diagnosed the root cause: local Wrangler preview serves over HTTP while the production-built session cookie was marked `Secure`, so the browser did not send it back to `/api/auth/me` or Microsoft connect.
+- Sprint 053 also found local D1 had `app_sessions` but lacked the documented demo Super Admin seed row; the login path now bootstraps only the documented demo Super Admin in demo mode when absent.
+- Super Admin same-org role update was validated and persisted `client_admin`.
+- Sprint 053-A amended the local bootstrap guard and admin user update paths so bootstrap requires demo mode plus local request host, same-org user updates are enforced, canonical roles are preserved, and final active Super Admin removal is rejected.
 - Architect Pack prepared, approved, and implemented for the code/documentation portion of Sprint 052.
 - Mandatory preflight confirmed the current repo root is `/Users/Dmoney/Documents/development/apps/emailorc`.
 - Current planning/docs files listed by the pack are present.
@@ -68,7 +78,7 @@ EmailORC remains MVP/demo-stage and should not be treated as production-ready.
 
 ## Active Sprint
 
-`planning/sprints/052-outlook-draft-integration/`
+`planning/sprints/053-local-auth-role-admin-fix/`
 
 ---
 
@@ -94,10 +104,10 @@ EmailORC remains MVP/demo-stage and should not be treated as production-ready.
 ## Next Actions
 
 1. Confirm Microsoft Entra app-registration settings for the dedicated test Outlook account.
-2. Apply required D1 migrations only in a future approved database step.
-3. Run manual Outlook Drafts verification after Microsoft configuration and D1 readiness.
-4. Do not mark Sprint 052 PASS until mailbox Drafts, Sent Items, and recipient non-delivery checks are complete.
-5. Apply the Sprint 012 D1 `app_sessions` migration only in a future approved database/deployment step.
+2. Commit Sprint 053/053-A only after owner approval.
+3. Apply required D1 migrations only in a future approved database step.
+4. Run manual Outlook Drafts verification after Microsoft configuration and D1 readiness.
+5. Do not mark Sprint 052 PASS until mailbox Drafts, Sent Items, and recipient non-delivery checks are complete.
 
 ---
 
@@ -105,6 +115,8 @@ EmailORC remains MVP/demo-stage and should not be treated as production-ready.
 
 - Production readiness is not established.
 - Sprint 012 D1 `app_sessions` migration is created but not applied.
+- Sprint 052 still awaits Entra configuration, D1 migration application, and Outlook mailbox UAT.
+- Sprint 053/053-A is implemented and validated locally, but not committed.
 - Brain / provider API guard hardening is complete for the current approved Sprint 015 route surface.
 - Billing/usage/account APIs remain future work unless already handled elsewhere.
 - Page/middleware/localStorage cleanup has not started.

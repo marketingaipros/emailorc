@@ -78,3 +78,77 @@ Sprint 015 established for approved Brain/provider routes:
 - Page/middleware/localStorage cleanup.
 - Production session storage deployment path and Sprint 012 D1 session migration application.
 - Production-readiness validation.
+
+---
+
+## Sprint 053 Local Auth / Role Focus
+
+Sprint 053 exists because local Outlook Draft testing is blocked before Microsoft OAuth begins.
+
+Observed local behavior:
+
+- `/api/integrations/microsoft/connect` returned `Authentication required.` under local Wrangler testing.
+- Super Admin user-role updates reportedly did not save.
+- A locally created user was assigned `client_admin`, creating uncertainty about the intended local test user role and session state.
+
+Sprint 053 must prove:
+
+- supported local login creates a valid server session under `npm run preview`
+- `/api/auth/me` recognizes that session
+- `/api/integrations/microsoft/connect` reaches the authenticated path for a valid session
+- logged-out users remain blocked
+- Super Admin same-organization role updates save when permitted
+- cross-organization or unauthorized role changes remain blocked
+
+Canonical MVP roles for this sprint:
+
+| Role | Intended meaning |
+|---|---|
+| `super_admin` | Internal system owner with global administrative access. |
+| `client_admin` | Customer/account owner within one organization. |
+| `editor` | Workflow contributor within one organization. |
+| `viewer` | Read-only organization user. |
+
+Sprint 053 does not change Microsoft OAuth scope, Graph draft-only behavior, D1 schema, or Sprint 052 status.
+
+### Sprint 053 Implementation Result
+
+Root cause:
+
+- `npm run preview` serves the production-built Worker over local HTTP.
+- The previous session cookie helper set `Secure` whenever `NODE_ENV === "production"`.
+- Browsers do not send Secure cookies over `http://localhost`, so `/api/auth/me` and `/api/integrations/microsoft/connect` could not see the session.
+- Local D1 also had `app_sessions` but lacked the documented demo Super Admin row.
+
+Fix:
+
+- Session cookie `Secure` behavior now follows the request URL protocol.
+- Local HTTP preview cookies are not marked Secure.
+- HTTPS requests still receive Secure cookies.
+- In demo mode only, and only for local request hosts, login can bootstrap the documented `admin@demo.com` Super Admin when that local D1 user row is absent.
+- The local bootstrap path rejects non-local hosts and does not create arbitrary users or roles.
+
+Validated:
+
+- `admin@demo.com` login under `npm run preview`
+- `/api/auth/me` returns `super_admin` and `org_demo`
+- Microsoft connect no longer returns immediate unauthenticated JSON for that session
+- logged-out Microsoft connect still returns `401`
+
+### Sprint 053-A Amendment
+
+Sprint 053-A hardened local demo bootstrap:
+
+- `APP_ENV=demo` alone is not enough to permit bootstrap.
+- Bootstrap also requires a local request host: `localhost`, `127.0.0.1`, or `[::1]`.
+- Unknown or non-local hosts default blocked.
+- Bootstrap creates only the documented demo Super Admin account.
+
+Admin role changes now protect platform-owner access in the admin user paths:
+
+- final Super Admin self-demotion is blocked
+- final Super Admin self-deactivation is blocked
+- final Super Admin self-archive is blocked
+- assignable roles stay canonical
+- same-org user updates are allowed when otherwise authorized
+- cross-org user updates are rejected

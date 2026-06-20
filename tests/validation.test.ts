@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { NextResponse } from "next/server";
 import { canAccessPath, canUseNavItem } from "../src/lib/auth-rules";
 import {
   cardsForCampaignBoardColumn,
@@ -7,6 +8,11 @@ import {
 } from "../src/lib/campaign-board";
 import { getCurrentUser } from "../src/lib/current-user";
 import { authorizeAdminUser } from "../src/lib/admin-auth";
+import {
+  isInactiveAdminStatus,
+  isSameOrganizationUpdate,
+  wouldRemoveFinalSuperAdmin,
+} from "../src/lib/admin-user-guards";
 import { authorizeBrainOrganization } from "../src/lib/brain-auth";
 import { authorizeWorkflowOrganization } from "../src/lib/workflow-auth";
 import { QA_APPROVAL_THRESHOLD, validateDraftApproval } from "../src/lib/draft-approval";
@@ -23,16 +29,18 @@ import {
   buildOutlookDraftPayload,
   postMicrosoftGraphDraft,
 } from "../src/lib/microsoft/graph";
-import { isSensitiveRoleAllowed, normalizeRole, permissionsForRole } from "../src/lib/roles";
+import { isSensitiveRoleAllowed, normalizeAssignableUserRole, normalizeRole, permissionsForRole } from "../src/lib/roles";
 import {
   createServerSession,
   hashSessionToken,
   readSessionToken,
   resetLocalSessionsForTests,
   SESSION_COOKIE_NAME,
+  setSessionCookie,
 } from "../src/lib/server-session";
 import { calculateDaysToRenew, classifyCampaignMode, detectBannedPhrases, validateRow } from "../src/utils/validation";
 import { GET as getAuthMe } from "../app/api/auth/me/route";
+import { isLocalDemoRuntime, shouldBootstrapDemoSuperAdmin } from "../src/lib/local-runtime";
 import { POST as postAuthLogout } from "../app/api/auth/logout/route";
 import { GET as getAdminSystemHealth } from "../app/api/admin/system-health/route";
 import { POST as postBrainLearningLog } from "../app/api/brain/learning-log/route";
@@ -67,6 +75,100 @@ describe("validation", () => {
     expect(normalizeRole("EDITOR")).toBe("editor");
     expect(normalizeRole("REVIEWER")).toBe("reviewer");
     expect(normalizeRole("VIEWER")).toBe("viewer");
+  });
+  it("normalizes assignable admin roles to persisted canonical values", () => {
+    expect(normalizeAssignableUserRole("SUPER_ADMIN")).toBe("super_admin");
+    expect(normalizeAssignableUserRole("CLIENT_ADMIN")).toBe("client_admin");
+    expect(normalizeAssignableUserRole("Client Admin")).toBe("client_admin");
+    expect(normalizeAssignableUserRole("EDITOR")).toBe("editor");
+    expect(normalizeAssignableUserRole("REVIEWER")).toBe("reviewer");
+    expect(normalizeAssignableUserRole("VIEWER")).toBe("viewer");
+    expect(normalizeAssignableUserRole("USER")).toBeNull();
+    expect(normalizeAssignableUserRole("client")).toBeNull();
+  });
+  it("allows demo bootstrap only for explicit local demo runtime", () => {
+    const previous = process.env.APP_ENV;
+    process.env.APP_ENV = "demo";
+    expect(isLocalDemoRuntime(new Request("http://localhost:8787/api/auth/login"))).toBe(true);
+    expect(isLocalDemoRuntime(new Request("http://127.0.0.1:8787/api/auth/login"))).toBe(true);
+    expect(isLocalDemoRuntime(new Request("http://[::1]:8787/api/auth/login"))).toBe(true);
+    expect(isLocalDemoRuntime(new Request("https://preview.emailorc.example/api/auth/login"))).toBe(false);
+    expect(isLocalDemoRuntime(new Request("https://emailorc-account-growth-demo.workers.dev/api/auth/login"))).toBe(false);
+    process.env.APP_ENV = "test-live";
+    expect(isLocalDemoRuntime(new Request("http://localhost:8787/api/auth/login"))).toBe(false);
+    process.env.APP_ENV = "production";
+    expect(isLocalDemoRuntime(new Request("http://localhost:8787/api/auth/login"))).toBe(false);
+    if (previous === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = previous;
+  });
+  it("allows bootstrap only for the documented demo Super Admin user", async () => {
+    const previous = process.env.APP_ENV;
+    process.env.APP_ENV = "demo";
+    const request = new Request("http://localhost:8787/api/auth/login");
+    const comparePassword = async (password: string) => password === "DemoAdmin123!";
+
+    await expect(shouldBootstrapDemoSuperAdmin({
+      request,
+      email: "admin@demo.com",
+      password: "DemoAdmin123!",
+      expectedEmail: "admin@demo.com",
+      comparePassword,
+    })).resolves.toBe(true);
+    await expect(shouldBootstrapDemoSuperAdmin({
+      request,
+      email: "client@demo.com",
+      password: "DemoAdmin123!",
+      expectedEmail: "admin@demo.com",
+      comparePassword,
+    })).resolves.toBe(false);
+    await expect(shouldBootstrapDemoSuperAdmin({
+      request,
+      email: "admin@demo.com",
+      password: "wrong",
+      expectedEmail: "admin@demo.com",
+      comparePassword,
+    })).resolves.toBe(false);
+
+    if (previous === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = previous;
+  });
+  it("blocks final active Super Admin removal paths", () => {
+    const base = {
+      activeSuperAdminCount: 1,
+      targetCurrentRole: "super_admin",
+    };
+    expect(wouldRemoveFinalSuperAdmin({ ...base, nextRole: "client_admin" })).toBe(true);
+    expect(wouldRemoveFinalSuperAdmin({ ...base, nextStatus: "SUSPENDED" })).toBe(true);
+    expect(wouldRemoveFinalSuperAdmin({ ...base, nextStatus: "ARCHIVED" })).toBe(true);
+    expect(wouldRemoveFinalSuperAdmin({ ...base, archive: true })).toBe(true);
+    expect(wouldRemoveFinalSuperAdmin({ ...base, nextRole: "super_admin", nextStatus: "ACTIVE" })).toBe(false);
+    expect(wouldRemoveFinalSuperAdmin({ activeSuperAdminCount: 2, targetCurrentRole: "super_admin", nextRole: "viewer" })).toBe(false);
+    expect(wouldRemoveFinalSuperAdmin({ activeSuperAdminCount: 1, targetCurrentRole: "client_admin", nextRole: "viewer" })).toBe(false);
+    expect(isInactiveAdminStatus("ACTIVE")).toBe(false);
+    expect(isInactiveAdminStatus("SUSPENDED")).toBe(true);
+    expect(isInactiveAdminStatus("ARCHIVED")).toBe(true);
+  });
+  it("enforces same-organization admin user update policy", () => {
+    expect(isSameOrganizationUpdate({
+      currentOrganizationId: "org_demo",
+      targetOrganizationId: "org_demo",
+      requestedOrganizationId: "org_demo",
+    })).toBe(true);
+    expect(isSameOrganizationUpdate({
+      currentOrganizationId: "org_demo",
+      targetOrganizationId: "org_other",
+      requestedOrganizationId: "org_other",
+    })).toBe(false);
+    expect(isSameOrganizationUpdate({
+      currentOrganizationId: "org_demo",
+      targetOrganizationId: "org_demo",
+      requestedOrganizationId: "org_other",
+    })).toBe(false);
+    expect(isSameOrganizationUpdate({
+      currentOrganizationId: null,
+      targetOrganizationId: "org_demo",
+      requestedOrganizationId: "org_demo",
+    })).toBe(false);
   });
   it("fails closed for unrecognized sensitive roles", () => {
     expect(normalizeRole("owner")).toBeNull();
@@ -127,6 +229,19 @@ describe("validation", () => {
       headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
     }));
     expect(currentUser?.userId).toBe("user_hash");
+  });
+  it("does not mark local HTTP preview session cookies as Secure", () => {
+    const localResponse = NextResponse.json({ ok: true });
+    setSessionCookie(localResponse, "local-token", new Request("http://localhost:8787/api/auth/login"));
+    const localCookie = localResponse.headers.get("set-cookie") || "";
+
+    const httpsResponse = NextResponse.json({ ok: true });
+    setSessionCookie(httpsResponse, "https-token", new Request("https://emailorc.example/api/auth/login"));
+    const httpsCookie = httpsResponse.headers.get("set-cookie") || "";
+
+    expect(localCookie).toContain(`${SESSION_COOKIE_NAME}=`);
+    expect(localCookie).not.toMatch(/;\s*Secure/i);
+    expect(httpsCookie).toMatch(/;\s*Secure/i);
   });
   it("logout clears the session cookie and revokes the local server session", async () => {
     resetLocalSessionsForTests();

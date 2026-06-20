@@ -181,3 +181,36 @@ Future API documentation should capture for each route:
 - Error states
 - Environment-mode behavior
 - Whether request-supplied identity is ignored, compared as requested scope, or still present only for backward-compatible non-auth behavior
+
+---
+
+## Sprint 053 Local Auth / Admin Role API Focus
+
+Sprint 053 will inspect and, after approval, may modify only the smallest proven local auth/admin surfaces needed to unblock a valid local session and Super Admin role-save behavior.
+
+Relevant route contracts to verify:
+
+- `POST /api/auth/login` should create a server-backed HTTP-only session cookie for a supported local user.
+- `GET /api/auth/me` should resolve the current user from that server session.
+- `GET /api/integrations/microsoft/connect` should return unauthenticated only when no valid EmailORC session exists; with a valid session it should continue to OAuth setup or a safe configuration-required response.
+- Admin user update routes should permit a valid Super Admin to save allowed same-organization role updates and reject unauthorized or cross-organization attempts.
+
+Sprint 053 must not change Outlook send boundaries. The Sprint 052 Microsoft route remains draft-only.
+
+Sprint 053 implementation result:
+
+- `POST /api/auth/login` can establish a local Wrangler preview session for the documented demo Super Admin.
+- `GET /api/auth/me` resolves that D1-backed session.
+- `GET /api/integrations/microsoft/connect` returns a redirect for the authenticated demo Super Admin instead of `Authentication required.`.
+- Logged-out access to Microsoft connect still returns `401`.
+- `PATCH /api/admin/users/[id]` persists assignable roles in canonical form, including `client_admin`.
+
+Sprint 053-A implementation result:
+
+- Login demo bootstrap is gated by demo mode plus a local request host, not just `APP_ENV=demo`.
+- Login demo bootstrap can create only the documented `admin@demo.com` Super Admin.
+- `POST /api/admin/users` rejects cross-organization creation/update attempts in the current MVP path.
+- `PATCH /api/admin/users/[id]` updates the active membership in the authenticated Super Admin's current organization, not the first membership blindly.
+- `PATCH /api/admin/users/[id]` rejects final Super Admin self-demotion and final Super Admin deactivation.
+- `DELETE /api/admin/users/[id]` rejects final Super Admin archive/delete.
+- Disallowed roles remain rejected; allowed roles persist canonically.
