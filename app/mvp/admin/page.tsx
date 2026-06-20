@@ -516,6 +516,18 @@ export default function AdminConsole() {
     setSystemHealth(null);
   };
 
+  if (!isSuperAdmin) {
+    return (
+      <div className="flex min-h-[70vh] items-center justify-center">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+          <Lock className="mx-auto h-8 w-8 text-slate-400" />
+          <p className="mt-3 text-sm font-black uppercase tracking-widest text-slate-500">Checking access...</p>
+          <p className="mt-2 text-sm text-slate-500">Admin Console is restricted to Super Admin users.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12">
       {/* Admin Header */}

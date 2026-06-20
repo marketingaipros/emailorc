@@ -2304,7 +2304,7 @@ export default function BrainCenterPage() {
                   <div className="space-y-6">
                     <div>
                       <h3 className="text-md font-semibold text-slate-900 mb-1">API Authentication</h3>
-                      <p className="text-sm text-slate-500 mb-4">Manage your organization's API credentials securely.</p>
+                      <p className="text-sm text-slate-500 mb-4">Manage your organization&apos;s API credentials securely.</p>
                     </div>
                     
                     <div className="space-y-4">

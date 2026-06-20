@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
-import { createId, getD1Database } from "@/lib/cloudflare-db";
+import { createId, getD1Database } from "../../../../src/lib/cloudflare-db";
+import { requireWorkflowOrganization } from "../../../../src/lib/workflow-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const db = await getD1Database();
   const body = await request.json().catch(() => ({}));
-  const orgId = body.organization_id || "org_demo";
-  const userId = body.user_id || "user_super_admin";
+  const workflowAuth = await requireWorkflowOrganization(request, body.organization_id);
+  if (workflowAuth.response) return workflowAuth.response;
+  const db = await getD1Database();
+  const orgId = workflowAuth.organizationId;
+  const userId = workflowAuth.currentUser.userId;
   const environment = String(body.environment || process.env.APP_ENV || "demo").toLowerCase().replaceAll("_", "-");
   const format = body.format || "CSV";
 

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { createId, getD1Database } from "@/lib/cloudflare-db";
-import { DEFAULT_APP_MINDSET, DEFAULT_BUSINESS_KNOWLEDGE, DEFAULT_OFFERS, DEFAULT_VOICE_MEMORY } from "@/lib/brain-context";
-import { generateSageRenewalDraft } from "@/lib/sage-renewal-generator";
+import { requireBrainOrganization } from "../../../../src/lib/brain-auth";
+import { createId, getD1Database } from "../../../../src/lib/cloudflare-db";
+import { DEFAULT_APP_MINDSET, DEFAULT_BUSINESS_KNOWLEDGE, DEFAULT_OFFERS, DEFAULT_VOICE_MEMORY } from "../../../../src/lib/brain-context";
+import { generateSageRenewalDraft } from "../../../../src/lib/sage-renewal-generator";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +11,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const current = body.current_draft || {};
     const draftId = String(body.draft_id || current.id || "");
-    const orgId = body.organization_id || "org_demo";
-    const userId = body.user_id || "user_super_admin";
+    const auth = await requireBrainOrganization(request, body.organization_id);
+    if (auth.response) return auth.response;
+    const orgId = auth.organizationId;
+    const userId = auth.currentUser.userId;
     const company = String(current.company || current._company || "Company");
     const name = String(current.name || current._name || "there");
     const product = String(current.product || current._product || "your current plan");

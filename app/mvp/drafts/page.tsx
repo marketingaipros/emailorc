@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, ShieldAlert, AlertTriangle } from "lucide-react";
 import { useNotice } from "@/components/notice/NoticeProvider";
+import { QA_APPROVAL_THRESHOLD } from "@/lib/draft-approval";
 import {
   ACCOUNT_CONTEXT_KEY,
   DEFAULT_OFFERS,
@@ -23,7 +24,6 @@ import {
 type ApprovalStatus = "Pending Review" | "Approved" | "Regenerate";
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
 const DRAFT_STATE_KEY = "emailorcDraftState";
-const QA_APPROVAL_THRESHOLD = 90;
 const INTERNAL_SUBJECT_WORDS = ["upsell", "campaign", "lead magnet", "strategy"];
 const FEEDBACK_REASONS = ["Too Generic", "Does Not Match Company", "Does Not Match Offer", "Wrong Pain Point", "Bad Subject Line", "Bad CTA", "Does Not Sound Human", "Too Salesy", "Too Long", "Too Vague", "Internal Language in Final Copy", "Use This Example as Style Reference", "Other"];
 const LEARNING_OPTIONS = ["Remember this style", "Avoid this phrase", "Avoid this structure", "Improve offer alignment", "Improve renewal context", "Improve company-specific language", "Make future emails more human", "Use this as a preferred example", "One-time feedback only"];
@@ -559,7 +559,7 @@ export default function DraftsPage() {
                 {/* Preview Text */}
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Preview Text</p>
-                  <p className="text-sm text-slate-500 italic">"{draft.previewText}"</p>
+                  <p className="text-sm text-slate-500 italic">&quot;{draft.previewText}&quot;</p>
                 </div>
 
                 {/* Email Body */}
@@ -756,6 +756,7 @@ export default function DraftsPage() {
                   {draft.status !== "Approved" ? (
                     <button
                       onClick={() => approve(draft.id)}
+                      disabled={Boolean(blockReason)}
                       aria-disabled={Boolean(blockReason)}
                       title={blockReason || "Approve Draft"}
                       className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all ${

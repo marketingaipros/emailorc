@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { createId, getD1Database } from "@/lib/cloudflare-db";
+import { prisma } from "../../../../../src/lib/prisma";
+import { createId, getD1Database } from "../../../../../src/lib/cloudflare-db";
 import * as bcrypt from "bcryptjs";
+import { requireSuperAdmin } from "../../../../../src/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }
 ) {
+  const admin = await requireSuperAdmin(request);
+  if (admin.response) return admin.response;
+
   try {
     const id = params.id;
     const body = await request.json();
@@ -167,6 +171,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
 ) {
+  const admin = await requireSuperAdmin(request);
+  if (admin.response) return admin.response;
+
   try {
     const id = params.id;
 

@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
-import { createId, getD1Database } from "@/lib/cloudflare-db";
-import { PLAN_CREDITS, planIdForName, trialEndDate } from "@/lib/billing";
+import { createId, getD1Database } from "../../../../../../src/lib/cloudflare-db";
+import { PLAN_CREDITS, planIdForName, trialEndDate } from "../../../../../../src/lib/billing";
+import { requireSuperAdmin } from "../../../../../../src/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const admin = await requireSuperAdmin(request);
+  if (admin.response) return admin.response;
+
   try {
     const db = await getD1Database();
     if (!db) return NextResponse.json({ error: "Database unavailable." }, { status: 503 });
@@ -32,7 +36,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       db.prepare(`
         INSERT INTO audit_log (id, actor_user_id, organization_id, action, target_type, target_id, metadata)
         VALUES (?, ?, ?, 'UPDATE_ORGANIZATION_PLAN', 'ORGANIZATION', ?, ?)
-      `).bind(createId("audit"), body.actor_user_id || null, params.id, params.id, JSON.stringify({ plan, credits, status })),
+      `).bind(createId("audit"), admin.currentUser.userId, params.id, params.id, JSON.stringify({ plan, credits, status })),
     ]);
 
     return NextResponse.json({ success: true, plan, status, credits_remaining: Math.max(0, credits - creditsUsed), message: "Organization plan updated." });

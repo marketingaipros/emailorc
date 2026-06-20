@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
-import { createId, getD1Database } from "@/lib/cloudflare-db";
+import { createId, getD1Database } from "../../../../src/lib/cloudflare-db";
+import { requireSuperAdmin } from "../../../../src/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
 const RESET_TABLES = ["approvals", "drafts", "leads", "export_batches", "analytics_events", "import_batches", "account_intelligence"];
 
 export async function POST(request: Request) {
+  const admin = await requireSuperAdmin(request);
+  if (admin.response) return admin.response;
+
   const db = await getD1Database();
   if (!db) return NextResponse.json({ error: "Database unavailable." }, { status: 503 });
   const body = await request.json();
@@ -58,11 +62,11 @@ export async function POST(request: Request) {
   statements.push(db.prepare(`
     INSERT INTO reset_audit (id, actor_user_id, organization_id, environment, reset_type, metadata)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(createId("reset"), body.actor_user_id || null, orgId, environment, resetType, JSON.stringify({ counts, includeUsageLogs, includeBrain })));
+  `).bind(createId("reset"), admin.currentUser.userId, orgId, environment, resetType, JSON.stringify({ counts, includeUsageLogs, includeBrain })));
   statements.push(db.prepare(`
     INSERT INTO audit_log (id, actor_user_id, organization_id, action, target_type, target_id, metadata)
     VALUES (?, ?, ?, 'RESET_DATA', 'SYSTEM', ?, ?)
-  `).bind(createId("audit"), body.actor_user_id || null, orgId, resetType, JSON.stringify({ environment, counts })));
+  `).bind(createId("audit"), admin.currentUser.userId, orgId, resetType, JSON.stringify({ environment, counts })));
 
   await db.batch(statements);
   return NextResponse.json({ success: true, reset_type: resetType, counts, message: "Reset completed. Users, organizations, plans, and system configuration were kept." });

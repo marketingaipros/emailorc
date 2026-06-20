@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
-import { createId, getD1Database } from "@/lib/cloudflare-db";
+import { requireBrainOrganization } from "../../../../src/lib/brain-auth";
+import { createId, getD1Database } from "../../../../src/lib/cloudflare-db";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const db = await getD1Database();
   const { searchParams } = new URL(request.url);
-  const orgId = searchParams.get("organization_id") || "org_demo";
+  const auth = await requireBrainOrganization(request, searchParams.get("organization_id"));
+  if (auth.response) return auth.response;
+  const orgId = auth.organizationId;
   if (!db) return NextResponse.json({ status: "local", items: [] });
   const result = await db.prepare(`
     SELECT * FROM learning_log
@@ -20,10 +23,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const db = await getD1Database();
   const body = await request.json().catch(() => ({}));
+  const auth = await requireBrainOrganization(request, body.organization_id);
+  if (auth.response) return auth.response;
   const item = {
     feedback_id: body.feedback_id || createId("feedback"),
-    organization_id: body.organization_id || "org_demo",
-    user_id: body.user_id || "user_super_admin",
+    organization_id: auth.organizationId,
+    user_id: auth.currentUser.userId,
     source: body.source || "draft",
     related_draft_id: body.related_draft_id || null,
     related_offer_id: body.related_offer_id || null,
@@ -33,7 +38,7 @@ export async function POST(request: Request) {
     suggested_rule: body.suggested_rule || "",
     status: body.status || "pending",
     created_at: body.created_at || new Date().toISOString(),
-    approved_by: body.approved_by || null,
+    approved_by: body.approved_by ? auth.currentUser.userId : null,
   };
 
   if (!db) return NextResponse.json({ status: "local", item });

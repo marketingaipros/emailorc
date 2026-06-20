@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireBrainOrganization } from "../../../../src/lib/brain-auth";
 import {
   TEST_CHAT_TASKS,
   fetchOpenRouterModels,
@@ -11,7 +12,7 @@ import {
   safeErrorMessage,
   sendOpenRouterChat,
   verifyOpenRouterKey,
-} from "@/lib/brain/openrouter";
+} from "../../../../src/lib/brain/openrouter";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +24,10 @@ export async function POST(request: Request) {
   const model = pickModel(modelMode, body.model);
   const task = String(body.task || "General Test");
   const prompt = String(body.prompt || "").trim();
-  const orgId = body.org_id || null;
-  const userId = body.user_id || null;
+  const auth = await requireBrainOrganization(request, body.org_id);
+  if (auth.response) return auth.response;
+  const orgId = auth.organizationId;
+  const userId = auth.currentUser.userId;
 
   if (provider !== "OpenRouter") {
     return NextResponse.json({ status: "error", message: "Only OpenRouter is supported right now." }, { status: 400 });

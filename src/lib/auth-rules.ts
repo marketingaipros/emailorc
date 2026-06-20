@@ -47,10 +47,11 @@ const ROLE_ROUTES: Record<UserRole, string[]> = {
 };
 
 export function canAccessPath(role: string | null, pathname: string) {
-  if (!role || !(role in ROLE_ROUTES)) return false;
-  if (role === "SUPER_ADMIN") return pathname.startsWith("/mvp");
+  const normalizedRole = String(role || "").trim().toUpperCase().replace(/[\s-]+/g, "_") as UserRole;
+  if (!(normalizedRole in ROLE_ROUTES)) return false;
+  if (normalizedRole === "SUPER_ADMIN") return pathname.startsWith("/mvp");
 
-  const routes = ROLE_ROUTES[role as UserRole];
+  const routes = ROLE_ROUTES[normalizedRole];
   return routes.some((route) => {
     if (route === "/mvp") return pathname === "/mvp";
     return pathname === route || pathname.startsWith(`${route}/`);
@@ -58,6 +59,7 @@ export function canAccessPath(role: string | null, pathname: string) {
 }
 
 export function canUseNavItem(role: string | null, href: string, adminOnly?: boolean) {
-  if (adminOnly) return role === "SUPER_ADMIN";
+  const normalizedRole = String(role || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  if (adminOnly) return normalizedRole === "SUPER_ADMIN";
   return canAccessPath(role, href);
 }

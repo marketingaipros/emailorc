@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireBrainOrganization } from "../../../../src/lib/brain-auth";
 import {
   fetchOpenRouterModels,
   getOpenRouterKey,
@@ -10,7 +11,7 @@ import {
   safeErrorMessage,
   sendOpenRouterChat,
   verifyOpenRouterKey,
-} from "@/lib/brain/openrouter";
+} from "../../../../src/lib/brain/openrouter";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +22,10 @@ export async function POST(request: Request) {
   const environment = String(body.environment || process.env.APP_ENV || "Demo");
   const modelMode = normalizeMode(body.selected_model_mode);
   const selectedModel = pickModel(modelMode, body.selected_model);
-  const orgId = body.org_id || null;
-  const userId = body.user_id || null;
+  const auth = await requireBrainOrganization(request, body.org_id);
+  if (auth.response) return auth.response;
+  const orgId = auth.organizationId;
+  const userId = auth.currentUser.userId;
 
   if (provider !== "OpenRouter") {
     return NextResponse.json({

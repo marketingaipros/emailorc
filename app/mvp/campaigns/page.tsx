@@ -1,29 +1,16 @@
 "use client";
 
-import React, { useState } from "react";
-import { MoreHorizontal, User } from "lucide-react";
+import React, { useRef, useState } from "react";
+import { MoreHorizontal } from "lucide-react";
+import {
+  CAMPAIGN_BOARD_COLUMNS,
+  CampaignBoardColumn,
+  INITIAL_CAMPAIGN_BOARD_CARDS,
+  cardsForCampaignBoardColumn,
+  moveCampaignBoardCard,
+} from "../../../src/lib/campaign-board";
 
-type ColId =
-  | "Uploaded"
-  | "Ready"
-  | "Draft Generated"
-  | "Needs Review"
-  | "Approved"
-  | "Exported"
-  | "Replied"
-  | "Not Interested"
-  | "Do Not Contact";
-
-interface KanbanCard {
-  id: number;
-  name: string;
-  company: string;
-  product: string;
-  owner: string;
-  column: ColId;
-}
-
-const COLUMN_CONFIG: Record<ColId, { color: string; dot: string }> = {
+const COLUMN_CONFIG: Record<CampaignBoardColumn, { color: string; dot: string }> = {
   "Uploaded":        { color: "bg-slate-100 text-slate-600",   dot: "bg-slate-400" },
   "Ready":           { color: "bg-blue-50 text-blue-700",       dot: "bg-blue-400" },
   "Draft Generated": { color: "bg-violet-50 text-violet-700",   dot: "bg-violet-400" },
@@ -35,52 +22,47 @@ const COLUMN_CONFIG: Record<ColId, { color: string; dot: string }> = {
   "Do Not Contact":  { color: "bg-red-50 text-red-700",         dot: "bg-red-400" },
 };
 
-const COLS: ColId[] = [
-  "Uploaded", "Ready", "Draft Generated", "Needs Review",
-  "Approved", "Exported", "Replied", "Not Interested", "Do Not Contact",
-];
-
-const INITIAL_CARDS: KanbanCard[] = [
-  { id: 1,  name: "Sarah Johnson",  company: "Apex Logistics",      product: "Pro Plan",    owner: "JR", column: "Approved" },
-  { id: 2,  name: "Marcus Webb",    company: "Greenfield Capital",   product: "Starter",     owner: "DK", column: "Approved" },
-  { id: 3,  name: "Carlos Mena",    company: "Mena Retail Group",    product: "Starter",     owner: "DK", column: "Needs Review" },
-  { id: 4,  name: "Olivia Stern",   company: "Stern & Associates",   product: "Enterprise",  owner: "JR", column: "Needs Review" },
-  { id: 5,  name: "Rina Patel",     company: "BluePath Health",      product: "Growth Plan", owner: "JR", column: "Draft Generated" },
-  { id: 6,  name: "Tom Hargrove",   company: "Hargrove.io",          product: "Pro Plan",    owner: "DK", column: "Draft Generated" },
-  { id: 7,  name: "Janet Liu",      company: "Skyline Dev Co.",      product: "Pro Plan",    owner: "JR", column: "Ready" },
-  { id: 8,  name: "Howard Grant",   company: "Grant Manufacturing",  product: "Enterprise",  owner: "DK", column: "Do Not Contact" },
-  { id: 9,  name: "Priya Nair",     company: "NairTech Solutions",   product: "Starter",     owner: "JR", column: "Replied" },
-  { id: 10, name: "Leon Brandt",    company: "Brandt Consulting",    product: "Pro Plan",    owner: "DK", column: "Uploaded" },
-  { id: 11, name: "Amara Osei",     company: "Osei Ventures",        product: "Growth Plan", owner: "JR", column: "Exported" },
-  { id: 12, name: "Chris Yamamoto", company: "Yama Digital",         product: "Starter",     owner: "DK", column: "Not Interested" },
-];
-
 const OWNER_COLORS: Record<string, string> = {
   JR: "bg-indigo-100 text-indigo-700",
   DK: "bg-purple-100 text-purple-700",
 };
 
 export default function CampaignBoardPage() {
-  const [cards, setCards] = useState<KanbanCard[]>(INITIAL_CARDS);
+  const [cards, setCards] = useState(INITIAL_CAMPAIGN_BOARD_CARDS);
   const [dragging, setDragging] = useState<number | null>(null);
-  const [dragOver, setDragOver] = useState<ColId | null>(null);
+  const draggingRef = useRef<number | null>(null);
+  const [dragOver, setDragOver] = useState<CampaignBoardColumn | null>(null);
 
-  const moveCard = (id: number, col: ColId) => {
-    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, column: col } : c)));
+  const moveCard = (id: number, col: CampaignBoardColumn) => {
+    setCards((prev) => moveCampaignBoardCard(prev, id, col));
   };
-  const onDragStart = (id: number) => setDragging(id);
-  const onDragOver = (e: React.DragEvent, col: ColId) => {
+  const onDragStart = (e: React.DragEvent, id: number) => {
+    draggingRef.current = id;
+    setDragging(id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(id));
+  };
+  const onDragOver = (e: React.DragEvent, col: CampaignBoardColumn) => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
     setDragOver(col);
   };
-  const onDrop = (col: ColId) => {
-    if (dragging !== null) {
-      moveCard(dragging, col);
+  const onDrop = (e: React.DragEvent, col: CampaignBoardColumn) => {
+    e.preventDefault();
+    const transferredId = Number(e.dataTransfer.getData("text/plain"));
+    const cardId = Number.isFinite(transferredId) && transferredId > 0 ? transferredId : draggingRef.current;
+    if (cardId !== null) {
+      moveCard(cardId, col);
     }
+    draggingRef.current = null;
     setDragging(null);
     setDragOver(null);
   };
-  const onDragEnd = () => { setDragging(null); setDragOver(null); };
+  const onDragEnd = () => {
+    draggingRef.current = null;
+    setDragging(null);
+    setDragOver(null);
+  };
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -94,8 +76,8 @@ export default function CampaignBoardPage() {
 
       {/* Board */}
       <div className="flex gap-3 overflow-x-auto pb-4 flex-1">
-        {COLS.map((col) => {
-          const colCards = cards.filter((c) => c.column === col);
+        {CAMPAIGN_BOARD_COLUMNS.map((col) => {
+          const colCards = cardsForCampaignBoardColumn(cards, col);
           const cfg = COLUMN_CONFIG[col];
           const isOver = dragOver === col;
 
@@ -105,7 +87,7 @@ export default function CampaignBoardPage() {
               className="flex flex-col flex-shrink-0 w-56"
               data-testid={`campaign-column-${col}`}
               onDragOver={(e) => onDragOver(e, col)}
-              onDrop={() => onDrop(col)}
+              onDrop={(e) => onDrop(e, col)}
             >
               {/* Column Header */}
               <div className={`flex items-center justify-between rounded-xl px-3 py-2 mb-2 ${cfg.color}`}>
@@ -126,7 +108,7 @@ export default function CampaignBoardPage() {
                     key={card.id}
                     draggable
                     data-testid={`campaign-card-${card.name}`}
-                    onDragStart={() => onDragStart(card.id)}
+                    onDragStart={(e) => onDragStart(e, card.id)}
                     onDragEnd={onDragEnd}
                     className={`bg-white rounded-xl border border-slate-100 p-3 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md hover:border-indigo-200 transition-all
                       ${dragging === card.id ? "opacity-40 scale-95" : "opacity-100"}`}
@@ -151,10 +133,10 @@ export default function CampaignBoardPage() {
                       <select
                         aria-label={`Move ${card.name}`}
                         value={card.column}
-                        onChange={(e) => moveCard(card.id, e.target.value as ColId)}
+                        onChange={(e) => moveCard(card.id, e.target.value as CampaignBoardColumn)}
                         className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600 outline-none transition-colors hover:border-indigo-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                       >
-                        {COLS.map((option) => (
+                        {CAMPAIGN_BOARD_COLUMNS.map((option) => (
                           <option key={option} value={option}>
                             {option}
                           </option>

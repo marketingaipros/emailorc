@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createId, getD1Database } from "@/lib/cloudflare-db";
+import { requireBrainOrganization } from "../../../../src/lib/brain-auth";
+import { createId, getD1Database } from "../../../../src/lib/cloudflare-db";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,9 @@ function rowToModel(row: any) {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const orgId = searchParams.get("org_id") || "org_demo";
+  const auth = await requireBrainOrganization(request, searchParams.get("org_id"));
+  if (auth.response) return auth.response;
+  const orgId = auth.organizationId;
   const db = await getD1Database();
 
   if (!db) {
@@ -46,8 +49,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
-  const orgId = body.organization_id || "org_demo";
-  const userId = body.user_id || "user_super_admin";
+  const auth = await requireBrainOrganization(request, body.organization_id);
+  if (auth.response) return auth.response;
+  const orgId = auth.organizationId;
+  const userId = auth.currentUser.userId;
   const models = Array.isArray(body.models) ? body.models : [];
   const db = await getD1Database();
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getOpenRouterKeyStatus, saveOpenRouterKey, safeErrorMessage } from "@/lib/brain/openrouter";
+import { requireBrainOrganization } from "../../../../src/lib/brain-auth";
+import { getOpenRouterKeyStatus, saveOpenRouterKey, safeErrorMessage } from "../../../../src/lib/brain/openrouter";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,9 @@ function errorCode(error: unknown) {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const orgId = searchParams.get("org_id") || undefined;
+  const auth = await requireBrainOrganization(request, searchParams.get("org_id"));
+  if (auth.response) return auth.response;
+  const orgId = auth.organizationId;
   const status = await getOpenRouterKeyStatus(orgId);
   return NextResponse.json({
     success: true,
@@ -28,14 +31,13 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { provider, api_key, org_id } = await request.json();
+    const auth = await requireBrainOrganization(request, org_id);
+    if (auth.response) return auth.response;
     if (provider !== "OpenRouter") {
       return NextResponse.json({ error: "Only OpenRouter keys are supported right now." }, { status: 400 });
     }
-    if (!org_id) {
-      return NextResponse.json({ error: "Organization is required to save an API key." }, { status: 400 });
-    }
 
-    const masked = await saveOpenRouterKey({ orgId: org_id, apiKey: String(api_key || "") });
+    const masked = await saveOpenRouterKey({ orgId: auth.organizationId, apiKey: String(api_key || "") });
     return NextResponse.json({
       success: true,
       status: "saved",

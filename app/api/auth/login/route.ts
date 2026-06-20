@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getD1Database, mapD1Organization, mapD1User } from "@/lib/cloudflare-db";
+import { createServerSession, setSessionCookie } from "@/lib/server-session";
+import { normalizeRole } from "@/lib/roles";
 import * as bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +67,12 @@ export async function POST(request: Request) {
         updated_at: row.org_updated_at,
       });
 
-      return NextResponse.json({
+      const role = normalizeRole(row.membership_role || "VIEWER");
+      if (!role) {
+        return NextResponse.json({ error: "User role is not recognized." }, { status: 403 });
+      }
+
+      const response = NextResponse.json({
         id: user.id,
         email: user.email,
         firstName: user.firstName,
@@ -78,6 +85,19 @@ export async function POST(request: Request) {
         subscriptionStatus: org.subscriptionStatus || "TRIAL_ACTIVE",
         aiCredits: org.aiCredits || 0,
       });
+
+      const session = await createServerSession(db, {
+        userId: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        organizationId: org.id || null,
+        organizationName: org.name || null,
+        role,
+        environmentMode: null,
+      });
+      setSessionCookie(response, session.token);
+      return response;
     }
 
     const user = await prisma.user.findUnique({
@@ -108,6 +128,11 @@ export async function POST(request: Request) {
     // Prepare session data (In a real app, you'd use a JWT or session cookie)
     // For this MVP, we'll return the user info to be stored in localStorage as before
     const primaryMembership = user.memberships[0];
+    const role = normalizeRole(primaryMembership?.role || "VIEWER");
+    if (!role) {
+      return NextResponse.json({ error: "User role is not recognized." }, { status: 403 });
+    }
+
     const userData = {
       id: user.id,
       email: user.email,
@@ -119,7 +144,19 @@ export async function POST(request: Request) {
       orgId: primaryMembership?.organization.id || null,
     };
 
-    return NextResponse.json(userData);
+    const response = NextResponse.json(userData);
+    const session = await createServerSession(null, {
+      userId: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      organizationId: primaryMembership?.organization.id || null,
+      organizationName: primaryMembership?.organization.name || null,
+      role,
+      environmentMode: null,
+    });
+    setSessionCookie(response, session.token);
+    return response;
   } catch (error) {
     console.error("Login error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

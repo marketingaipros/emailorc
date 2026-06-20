@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { fetchOpenRouterModelCatalog, getOpenRouterKey, safeErrorMessage, verifyOpenRouterKey } from "@/lib/brain/openrouter";
+import { requireBrainOrganization } from "../../../../src/lib/brain-auth";
+import { fetchOpenRouterModelCatalog, getOpenRouterKey, safeErrorMessage, verifyOpenRouterKey } from "../../../../src/lib/brain/openrouter";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const orgId = searchParams.get("org_id") || undefined;
+  const auth = await requireBrainOrganization(request, searchParams.get("org_id"));
+  if (auth.response) return auth.response;
+  const orgId = auth.organizationId;
 
   try {
     const { key, source } = await getOpenRouterKey(orgId);

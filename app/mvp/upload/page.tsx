@@ -27,6 +27,13 @@ import {
   loadJsonArray,
 } from "@/lib/brain-context";
 import { generateSageRenewalDraft } from "@/lib/sage-renewal-generator";
+import {
+  STANDARD_IMPORT_FIELDS,
+  formatImportValidationSummary,
+  inferImportMapping,
+  mapImportRecord,
+  validateImportRows,
+} from "@/lib/import-validation";
 
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
 const QA_APPROVAL_THRESHOLD = 90;
@@ -50,87 +57,8 @@ const EMPTY_ACCOUNT_CONTEXT: ManualAccountContext = {
   saveMode: "contact",
 };
 
-const STANDARD_FIELDS = [
-  "Source Row ID",
-  "First Name",
-  "Last Name",
-  "Full Name",
-  "Decision Maker",
-  "Business Name",
-  "Company Name",
-  "Email",
-  "Phone",
-  "Website",
-  "Industry",
-  "Customer Type",
-  "Current Product",
-  "Current Service",
-  "Current Plan",
-  "Renewal Date",
-  "Days to Renew",
-  "Account Status",
-  "Last Contact Date",
-  "Notes",
-  "Pain Point",
-  "Upsell Offer",
-  "Offer Type",
-  "Lead Source",
-  "Do Not Contact",
-  "Owner / Account Manager",
-];
-
-const FIELD_ALIASES: Record<string, string[]> = {
-  "Source Row ID": ["id", "row id", "source id"],
-  "First Name": ["first", "first name", "firstname"],
-  "Last Name": ["last", "last name", "lastname"],
-  "Full Name": ["name", "full name", "contact name", "customer name"],
-  "Decision Maker": ["decision maker", "dm", "contact"],
-  "Business Name": ["business", "business name", "account"],
-  "Company Name": ["company", "company name", "organization", "account name"],
-  Email: ["email", "email address", "contact email"],
-  Phone: ["phone", "phone number", "mobile"],
-  Website: ["website", "url", "domain"],
-  Industry: ["industry", "vertical"],
-  "Customer Type": ["customer type", "client type", "segment"],
-  "Current Product": ["current product", "product"],
-  "Current Service": ["current service", "service"],
-  "Current Plan": ["current plan", "plan"],
-  "Renewal Date": ["renewal date", "renewal"],
-  "Days to Renew": ["days to renew", "days until renewal"],
-  "Account Status": ["account status", "status"],
-  "Last Contact Date": ["last contact", "last contact date"],
-  Notes: ["notes", "account notes"],
-  "Pain Point": ["pain", "pain point", "challenge"],
-  "Upsell Offer": ["upsell", "upsell offer", "offer"],
-  "Offer Type": ["offer type"],
-  "Lead Source": ["lead source", "source"],
-  "Do Not Contact": ["do not contact", "dnc", "opt out", "unsubscribe"],
-  "Owner / Account Manager": ["owner", "account manager", "rep"],
-};
-
-function normalize(value: string) {
-  return value.toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function inferMapping(headers: string[]) {
-  const normalized = Object.fromEntries(headers.map((header) => [header, normalize(header)]));
-  return Object.fromEntries(headers.map((header) => {
-    const match = STANDARD_FIELDS.find((field) => FIELD_ALIASES[field]?.some((alias) => normalized[header] === normalize(alias)));
-    return [header, match || "Ignore column"];
-  }));
-}
-
 function mappedRecord(row: Record<string, any>, mapping: Record<string, string>) {
-  const standard: Record<string, string> = {};
-  const custom: Record<string, string> = {};
-  Object.entries(mapping).forEach(([header, target]) => {
-    if (!target || target === "Ignore column") return;
-    const value = String(row[header] ?? "").trim();
-    if (!value) return;
-    if (STANDARD_FIELDS.includes(target)) standard[target] = value;
-    else custom[target] = value;
-  });
-  return { standard, custom };
+  return mapImportRecord(row, mapping);
 }
 
 function isDnc(value = "") {
@@ -218,7 +146,7 @@ export default function UploadPage() {
           return;
         }
         setData(rows);
-        setFieldMapping(inferMapping(Object.keys(rows[0] || {})));
+        setFieldMapping(inferImportMapping(Object.keys(rows[0] || {})));
         notice.success(`${rows.length} records loaded. Review mapping and select an offer before import.`, "Upload completed");
       },
       error: (error) => notice.error(error.message || "Upload failed. Check the file format.", "Upload failed"),
@@ -272,12 +200,25 @@ export default function UploadPage() {
       return;
     }
 
+    const mappedRows = data.map((row) => mappedRecord(row, fieldMapping));
+    const validation = validateImportRows({
+      mapping: fieldMapping,
+      records: mappedRows.map(({ standard }) => ({ _standard_fields: standard })),
+    });
+    if (!validation.valid) {
+      notice.error(formatImportValidationSummary(validation), "Import validation failed");
+      return;
+    }
+    if (validation.warnings.length) {
+      notice.warning(`${validation.warnings.length} rows have identity or renewal context warnings and will need review.`, "Import review needed");
+    }
+
     setIsProcessing(true);
     setTimeout(async () => {
       const existingBodies: string[] = [];
       const existingSubjects: string[] = [];
       const generated = data.map((row, idx) => {
-        const { standard, custom } = mappedRecord(row, fieldMapping);
+        const { standard, custom } = mappedRows[idx];
         const accountContext = mergeAccountContext(bulkAccountContext, standard, custom);
         const draft = generateSageRenewalDraft({
           id: `upload-${Date.now()}-${idx}`,
@@ -322,7 +263,7 @@ export default function UploadPage() {
       });
       setResults(generated);
       persistDrafts(generated);
-      fetch("/api/workflow/import", {
+      const saved = await fetch("/api/workflow/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -337,10 +278,14 @@ export default function UploadPage() {
           records: generated,
           account_context: bulkAccountContext,
         }),
-      }).then(async (response) => {
-        const saved = await response.json().catch(() => ({}));
-        if (saved.status === "success") notice.info(`Saved ${saved.records_saved} records to the ${currentEnvironment()} database.`, "Database saved");
-      }).catch(() => notice.warning("Drafts were saved in this browser, but database persistence failed.", "Database warning"));
+      }).then((response) => response.json().catch(() => ({}))).catch(() => null);
+      if (saved?.status === "error") {
+        setIsProcessing(false);
+        notice.error(saved.error || "Database import validation failed.", "Database import failed");
+        return;
+      }
+      if (saved?.status === "success") notice.info(`Saved ${saved.records_saved} records to the ${currentEnvironment()} database.`, "Database saved");
+      if (!saved) notice.warning("Drafts were saved in this browser, but database persistence failed.", "Database warning");
       setIsProcessing(false);
       notice.success(`${generated.length} records imported, validated, and drafted with Brain context.`, "Import complete");
     }, 900);
@@ -406,7 +351,7 @@ export default function UploadPage() {
                     <select value={fieldMapping[header] || "Ignore column"} onChange={(e) => setFieldMapping((prev) => ({ ...prev, [header]: e.target.value }))} className="w-full rounded-lg border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
                       <option value="Ignore column">Ignore column</option>
                       <optgroup label="Standard fields">
-                        {STANDARD_FIELDS.map((field) => <option key={field} value={field}>{field}</option>)}
+                        {STANDARD_IMPORT_FIELDS.map((field) => <option key={field} value={field}>{field}</option>)}
                       </optgroup>
                       {customFields.length > 0 && (
                         <optgroup label="Custom fields">

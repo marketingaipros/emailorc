@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { createId, getD1Database } from "@/lib/cloudflare-db";
+import { createId, getD1Database } from "../../../../src/lib/cloudflare-db";
+import { formatImportValidationSummary, validateImportRows } from "../../../../src/lib/import-validation";
+import { requireWorkflowOrganization } from "../../../../src/lib/workflow-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -8,16 +10,35 @@ function envName(input?: string) {
 }
 
 export async function POST(request: Request) {
-  const db = await getD1Database();
   const body = await request.json().catch(() => ({}));
-  const orgId = body.organization_id || "org_demo";
-  const userId = body.user_id || "user_super_admin";
+  const workflowAuth = await requireWorkflowOrganization(request, body.organization_id);
+  if (workflowAuth.response) return workflowAuth.response;
+  const db = await getD1Database();
+  const orgId = workflowAuth.organizationId;
+  const userId = workflowAuth.currentUser.userId;
   const environment = envName(body.environment);
   const batchId = createId("batch");
   const rows = Array.isArray(body.records) ? body.records : [];
+  const validation = validateImportRows({
+    mapping: body.mapping || {},
+    records: rows,
+  });
+
+  if (!validation.valid) {
+    return NextResponse.json({
+      status: "error",
+      error: formatImportValidationSummary(validation),
+      validation,
+    }, { status: 400 });
+  }
 
   if (!db) {
-    return NextResponse.json({ status: "local", message: "Database unavailable in local dev; browser fallback active.", batch_id: batchId });
+    return NextResponse.json({
+      status: "local",
+      message: "Database unavailable in local dev; browser fallback active.",
+      batch_id: batchId,
+      validation,
+    });
   }
 
   try {
@@ -73,9 +94,10 @@ export async function POST(request: Request) {
         created: rows.length,
         updated: 0,
         duplicates: 0,
-        needs_review: needsReview,
+        needs_review: Math.max(needsReview, validation.warnings.length),
         failed: 0,
       },
+      validation,
     });
   } catch (error: any) {
     return NextResponse.json({ status: "error", error: error.message || "Could not save import." }, { status: 500 });

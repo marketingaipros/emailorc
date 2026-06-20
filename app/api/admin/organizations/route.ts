@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getD1Database, mapD1Organization } from "@/lib/cloudflare-db";
+import { prisma } from "../../../../src/lib/prisma";
+import { getD1Database, mapD1Organization } from "../../../../src/lib/cloudflare-db";
+import { requireSuperAdmin } from "../../../../src/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const admin = await requireSuperAdmin(request);
+  if (admin.response) return admin.response;
+
   try {
     const db = await getD1Database();
     if (db) {

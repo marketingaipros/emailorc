@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
-import { createEmbedding, cosineSimilarity, safeErrorMessage } from "@/lib/brain/embeddings";
-import { getD1Database } from "@/lib/cloudflare-db";
-import { logBrainUsage } from "@/lib/brain/openrouter";
+import { requireBrainOrganization } from "../../../../src/lib/brain-auth";
+import { createEmbedding, cosineSimilarity, safeErrorMessage } from "../../../../src/lib/brain/embeddings";
+import { getD1Database } from "../../../../src/lib/cloudflare-db";
+import { logBrainUsage } from "../../../../src/lib/brain/openrouter";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
-  const orgId = body.organization_id || "org_demo";
-  const userId = body.user_id || "user_super_admin";
+  const auth = await requireBrainOrganization(request, body.organization_id);
+  if (auth.response) return auth.response;
+  const orgId = auth.organizationId;
+  const userId = auth.currentUser.userId;
   const provider = String(body.provider || "OpenAI");
   const modelId = String(body.model_id || "text-embedding-3-small");
   try {

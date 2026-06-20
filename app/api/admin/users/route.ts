@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { createId, getD1Database } from "@/lib/cloudflare-db";
+import { prisma } from "../../../../src/lib/prisma";
+import { createId, getD1Database } from "../../../../src/lib/cloudflare-db";
 import * as bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
-import { createInviteForD1 } from "@/lib/admin/invite-service";
+import { createInviteForD1 } from "../../../../src/lib/admin/invite-service";
+import { requireSuperAdmin } from "../../../../src/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const admin = await requireSuperAdmin(request);
+  if (admin.response) return admin.response;
+
   try {
     const db = await getD1Database();
     if (db) {
@@ -100,6 +104,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const admin = await requireSuperAdmin(request);
+  if (admin.response) return admin.response;
+
   try {
     const body = await request.json();
     const { 

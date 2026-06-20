@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
-import { getD1Database } from "@/lib/cloudflare-db";
+import { getD1Database } from "../../../../src/lib/cloudflare-db";
+import { requireSuperAdmin } from "../../../../src/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
 const TABLES = ["organizations", "users", "leads", "drafts", "usage_logs", "import_batches", "export_batches", "analytics_events"];
 
 export async function GET(request: Request) {
+  const admin = await requireSuperAdmin(request);
+  if (admin.response) return admin.response;
+
   const db = await getD1Database();
   const { searchParams } = new URL(request.url);
   const environment = (searchParams.get("environment") || process.env.APP_ENV || "demo").toLowerCase();

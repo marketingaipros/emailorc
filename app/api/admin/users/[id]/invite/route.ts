@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { getD1Database } from "@/lib/cloudflare-db";
-import { createInviteForD1 } from "@/lib/admin/invite-service";
+import { getD1Database } from "../../../../../../src/lib/cloudflare-db";
+import { createInviteForD1 } from "../../../../../../src/lib/admin/invite-service";
+import { requireSuperAdmin } from "../../../../../../src/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,9 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } },
 ) {
+  const admin = await requireSuperAdmin(request);
+  if (admin.response) return admin.response;
+
   const db = await getD1Database();
   if (!db) return NextResponse.json({ error: "Invite links require Cloudflare D1 storage." }, { status: 503 });
 

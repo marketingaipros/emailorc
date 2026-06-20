@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
-import { getD1Database } from "@/lib/cloudflare-db";
+import { getD1Database } from "../../../../src/lib/cloudflare-db";
+import { requireWorkflowOrganization } from "../../../../src/lib/workflow-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    const db = await getD1Database();
     const { searchParams } = new URL(request.url);
-    const orgId = searchParams.get("organization_id") || "org_demo";
+    const workflowAuth = await requireWorkflowOrganization(request, searchParams.get("organization_id"));
+    if (workflowAuth.response) return workflowAuth.response;
+    const db = await getD1Database();
+    const orgId = workflowAuth.organizationId;
     const environment = (searchParams.get("environment") || process.env.APP_ENV || "demo").toLowerCase().replaceAll("_", "-");
 
     if (!db) return NextResponse.json({ status: "local", drafts: [] });

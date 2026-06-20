@@ -1,28 +1,27 @@
 import { NextResponse } from "next/server";
-import { createId, getD1Database } from "@/lib/cloudflare-db";
+import { createId, getD1Database } from "../../../../src/lib/cloudflare-db";
+import { validateDraftApproval } from "../../../../src/lib/draft-approval";
+import { requireWorkflowOrganization } from "../../../../src/lib/workflow-auth";
 
 export const dynamic = "force-dynamic";
-
-const APPROVER_ROLES = new Set(["SUPER_ADMIN", "CLIENT_ADMIN", "REVIEWER"]);
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const role = String(body.user_role || "");
-    const draftId = String(body.draft_id || "");
-    const qaScore = Number(body.qa_score || 0);
-    const spamRisk = String(body.spam_risk || "");
-    const subject1 = String(body.subject_line_1 || "").trim();
-    const subject2 = String(body.subject_line_2 || "").trim();
-    const orgId = body.organization_id || "org_demo";
-    const userId = body.user_id || "user_super_admin";
+    const workflowAuth = await requireWorkflowOrganization(request, body.organization_id);
+    if (workflowAuth.response) return workflowAuth.response;
+    const orgId = workflowAuth.organizationId;
+    const userId = workflowAuth.currentUser.userId;
+    const approval = validateDraftApproval({
+      userRole: workflowAuth.currentUser.role,
+      draftId: body.draft_id,
+      qaScore: body.qa_score,
+      spamRisk: body.spam_risk,
+      subjectLine1: body.subject_line_1,
+      subjectLine2: body.subject_line_2,
+    });
 
-    if (!draftId) return NextResponse.json({ error: "Draft missing required fields." }, { status: 400 });
-    if (!APPROVER_ROLES.has(role)) return NextResponse.json({ error: "User does not have approval permission." }, { status: 403 });
-    if (qaScore < 90) return NextResponse.json({ error: "QA score below threshold." }, { status: 400 });
-    if (!["Low", "Medium"].includes(spamRisk)) return NextResponse.json({ error: "Draft spam risk is too high." }, { status: 400 });
-    if (!subject1 || !subject2) return NextResponse.json({ error: "Draft missing required fields." }, { status: 400 });
-    if (subject1.toLowerCase() === subject2.toLowerCase()) return NextResponse.json({ error: "Duplicate subject lines." }, { status: 400 });
+    if ("error" in approval) return NextResponse.json({ error: approval.error }, { status: approval.status });
 
     const db = await getD1Database();
     if (db) {
@@ -31,21 +30,21 @@ export async function POST(request: Request) {
         UPDATE drafts
         SET approval_status = 'APPROVED', approved_by_user_id = ?, approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND organization_id = ?
-      `).bind(userId, draftId, orgId),
+      `).bind(userId, approval.draftId, orgId),
       db.prepare(`
         INSERT INTO approvals (id, organization_id, user_id, draft_id, environment, approval_status, qa_score)
         VALUES (?, ?, ?, ?, ?, 'APPROVED', ?)
-      `).bind(createId("approval"), orgId, userId, draftId, process.env.APP_ENV || "demo", qaScore),
+      `).bind(createId("approval"), orgId, userId, approval.draftId, process.env.APP_ENV || "demo", approval.qaScore),
       db.prepare(`
         INSERT INTO audit_log (id, actor_user_id, organization_id, action, target_type, target_id, metadata)
         VALUES (?, ?, ?, 'APPROVE_DRAFT', 'DRAFT', ?, ?)
-      `).bind(createId("audit"), userId, orgId, draftId, JSON.stringify({ qaScore, spamRisk })),
+      `).bind(createId("audit"), userId, orgId, approval.draftId, JSON.stringify({ qaScore: approval.qaScore, spamRisk: approval.spamRisk })),
       ]);
     }
 
     return NextResponse.json({
       status: "approved",
-      draft_id: draftId,
+      draft_id: approval.draftId,
       approved_at: new Date().toISOString(),
       message: "Draft approved successfully.",
     });

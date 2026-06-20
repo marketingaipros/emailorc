@@ -1,5 +1,35 @@
 import { describe, expect, it } from "vitest";
+import { canAccessPath, canUseNavItem } from "../src/lib/auth-rules";
+import {
+  cardsForCampaignBoardColumn,
+  INITIAL_CAMPAIGN_BOARD_CARDS,
+  moveCampaignBoardCard,
+} from "../src/lib/campaign-board";
+import { getCurrentUser } from "../src/lib/current-user";
+import { authorizeAdminUser } from "../src/lib/admin-auth";
+import { authorizeBrainOrganization } from "../src/lib/brain-auth";
+import { authorizeWorkflowOrganization } from "../src/lib/workflow-auth";
+import { QA_APPROVAL_THRESHOLD, validateDraftApproval } from "../src/lib/draft-approval";
+import { inferImportMapping, mapImportRecord, validateImportRows } from "../src/lib/import-validation";
+import { isSensitiveRoleAllowed, normalizeRole, permissionsForRole } from "../src/lib/roles";
+import {
+  createServerSession,
+  hashSessionToken,
+  readSessionToken,
+  resetLocalSessionsForTests,
+  SESSION_COOKIE_NAME,
+} from "../src/lib/server-session";
 import { calculateDaysToRenew, classifyCampaignMode, detectBannedPhrases, validateRow } from "../src/utils/validation";
+import { GET as getAuthMe } from "../app/api/auth/me/route";
+import { POST as postAuthLogout } from "../app/api/auth/logout/route";
+import { GET as getAdminSystemHealth } from "../app/api/admin/system-health/route";
+import { POST as postBrainLearningLog } from "../app/api/brain/learning-log/route";
+import { GET as getBrainModelSettings } from "../app/api/brain/model-settings/route";
+import { POST as postDraftApproval } from "../app/api/drafts/approve/route";
+import { GET as getWorkflowDrafts } from "../app/api/workflow/drafts/route";
+import { POST as postWorkflowImport } from "../app/api/workflow/import/route";
+import { GET as getWorkflowRecords } from "../app/api/workflow/records/route";
+
 describe("validation", () => {
   it("calculates days to renew", () => { expect(calculateDaysToRenew(new Date("2026-05-10"), new Date("2026-05-01"))).toBe(9); });
   it("detects missing field", () => { const r = validateRow({ sourceRowId: "1" }); expect(r.missingFields).toContain("Renewal_Date"); });
@@ -8,4 +38,457 @@ describe("validation", () => {
   it("guardrail score below 9 not final", () => { const approved = 8 >= 9; expect(approved).toBe(false); });
   it("export approved only guardrail", () => { const rows = [{ finalOutputReady: true }, { finalOutputReady: false }]; expect(rows.filter(r=>r.finalOutputReady)).toHaveLength(1); });
   it("detects banned phrases", () => { expect(detectBannedPhrases("I hope this finds you well", ["I hope this finds you well"]).length).toBe(1); });
+  it("restricts admin path to Super Admin", () => {
+    expect(canAccessPath("SUPER_ADMIN", "/mvp/admin")).toBe(true);
+    expect(canAccessPath("super_admin", "/mvp/admin")).toBe(true);
+    expect(canAccessPath("CLIENT_ADMIN", "/mvp/admin")).toBe(false);
+    expect(canAccessPath(null, "/mvp/admin")).toBe(false);
+    expect(canUseNavItem("CLIENT_ADMIN", "/mvp/admin", true)).toBe(false);
+  });
+  it("normalizes Sprint 012 auth roles and preserves app compatibility roles", () => {
+    expect(normalizeRole("SUPER_ADMIN")).toBe("super_admin");
+    expect(normalizeRole("Client Admin")).toBe("client_admin");
+    expect(normalizeRole("USER")).toBe("user");
+    expect(normalizeRole("demo-user")).toBe("demo_user");
+    expect(normalizeRole("EDITOR")).toBe("editor");
+    expect(normalizeRole("REVIEWER")).toBe("reviewer");
+    expect(normalizeRole("VIEWER")).toBe("viewer");
+  });
+  it("fails closed for unrecognized sensitive roles", () => {
+    expect(normalizeRole("owner")).toBeNull();
+    expect(isSensitiveRoleAllowed("owner", ["super_admin"])).toBe(false);
+    expect(permissionsForRole("owner")).toMatchObject({
+      canTransitionProduction: false,
+      canManageUsers: false,
+      canManagePlans: false,
+      canManageEnvironment: false,
+    });
+  });
+  it("returns unauthenticated for /api/auth/me without a server session", async () => {
+    resetLocalSessionsForTests();
+    const response = await getAuthMe(new Request("http://localhost/api/auth/me?user_id=user_super_admin&role=SUPER_ADMIN"));
+    expect(response.status).toBe(401);
+  });
+  it("resolves /api/auth/me from server session cookie without trusting query identity", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_server",
+      email: "server@example.com",
+      firstName: "Server",
+      lastName: "User",
+      organizationId: "org_server",
+      organizationName: "Server Org",
+      role: "client_admin",
+      environmentMode: "demo",
+    });
+
+    const request = new Request("http://localhost/api/auth/me?user_id=spoofed&role=SUPER_ADMIN", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    });
+    const response = await getAuthMe(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.user_id).toBe("user_server");
+    expect(body.email).toBe("server@example.com");
+    expect(body.role).toBe("client_admin");
+    expect(body.organization_id).toBe("org_server");
+    expect(body.session_source).toBe("local_dev_memory");
+  });
+  it("uses opaque session tokens and SHA-256 token hashes", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_hash",
+      email: "hash@example.com",
+      organizationId: "org_hash",
+      organizationName: "Hash Org",
+      role: "viewer",
+    });
+
+    expect(session.token).not.toBe(session.tokenHash);
+    expect(hashSessionToken(session.token)).toBe(session.tokenHash);
+    expect(session.tokenHash).toHaveLength(64);
+
+    const currentUser = await getCurrentUser(new Request("http://localhost/api/auth/me", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+    expect(currentUser?.userId).toBe("user_hash");
+  });
+  it("logout clears the session cookie and revokes the local server session", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_logout",
+      email: "logout@example.com",
+      organizationId: "org_logout",
+      organizationName: "Logout Org",
+      role: "viewer",
+    });
+    const request = new Request("http://localhost/api/auth/logout", {
+      method: "POST",
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    });
+
+    const response = await postAuthLogout(request);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toContain(`${SESSION_COOKIE_NAME}=`);
+    expect(readSessionToken(request)).toBe(session.token);
+
+    const currentUser = await getCurrentUser(new Request("http://localhost/api/auth/me", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+    expect(currentUser).toBeNull();
+  });
+  it("blocks unauthenticated admin API access", async () => {
+    resetLocalSessionsForTests();
+    const response = await getAdminSystemHealth(new Request("http://localhost/api/admin/system-health?organization_id=org_demo&environment=demo"));
+    expect(response.status).toBe(401);
+  });
+  it("blocks authenticated non-super-admin admin API access", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_client_admin",
+      email: "client-admin@example.com",
+      organizationId: "org_client",
+      organizationName: "Client Org",
+      role: "client_admin",
+    });
+
+    const response = await getAdminSystemHealth(new Request("http://localhost/api/admin/system-health?organization_id=org_demo&environment=demo", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+    expect(response.status).toBe(403);
+  });
+  it("allows authenticated super-admin admin API access to reach existing behavior", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_super_admin",
+      email: "super-admin@example.com",
+      organizationId: "org_admin",
+      organizationName: "Admin Org",
+      role: "super_admin",
+    });
+
+    const response = await getAdminSystemHealth(new Request("http://localhost/api/admin/system-health?organization_id=org_demo&environment=demo", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      database_connected: false,
+      active_environment: "demo",
+    });
+  });
+  it("fails admin authorization closed for unknown roles", async () => {
+    const result = authorizeAdminUser({
+      role: "owner",
+    } as any);
+
+    expect(result.currentUser).toBeNull();
+    expect(result.response?.status).toBe(403);
+  });
+  it("blocks unauthenticated workflow API access", async () => {
+    resetLocalSessionsForTests();
+    const response = await getWorkflowRecords(new Request("http://localhost/api/workflow/records?organization_id=org_demo&environment=demo"));
+    expect(response.status).toBe(401);
+  });
+  it("blocks workflow API access for a different organization", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_org_a",
+      email: "org-a@example.com",
+      organizationId: "org_a",
+      organizationName: "Org A",
+      role: "client_admin",
+    });
+
+    const response = await getWorkflowDrafts(new Request("http://localhost/api/workflow/drafts?organization_id=org_b&environment=demo", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+
+    expect(response.status).toBe(403);
+  });
+  it("allows authorized workflow API access to reach existing local behavior", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_org_a",
+      email: "org-a@example.com",
+      organizationId: "org_a",
+      organizationName: "Org A",
+      role: "client_admin",
+    });
+
+    const response = await getWorkflowDrafts(new Request("http://localhost/api/workflow/drafts?organization_id=org_a&environment=demo", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ status: "local", drafts: [] });
+  });
+  it("uses server current-user role instead of request-supplied draft approval role", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "server_approver",
+      email: "approver@example.com",
+      organizationId: "org_a",
+      organizationName: "Org A",
+      role: "client_admin",
+    });
+
+    const response = await postDraftApproval(new Request("http://localhost/api/drafts/approve", {
+      method: "POST",
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${session.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        organization_id: "org_a",
+        user_id: "spoofed_user",
+        user_role: "viewer",
+        draft_id: "draft-1",
+        qa_score: QA_APPROVAL_THRESHOLD,
+        spam_risk: "Low",
+        subject_line_1: "First option",
+        subject_line_2: "Second option",
+      }),
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ status: "approved", draft_id: "draft-1" });
+  });
+  it("uses server current-user organization instead of request-supplied import identity", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "server_importer",
+      email: "importer@example.com",
+      organizationId: "org_a",
+      organizationName: "Org A",
+      role: "editor",
+    });
+
+    const response = await postWorkflowImport(new Request("http://localhost/api/workflow/import", {
+      method: "POST",
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${session.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        organization_id: "org_b",
+        user_id: "spoofed_user",
+        user_role: "super_admin",
+        mapping: { Email: "Email" },
+        records: [{ _standard_fields: { Email: "valid@example.com" } }],
+      }),
+    }));
+
+    expect(response.status).toBe(403);
+  });
+  it("fails workflow authorization closed for unknown roles", async () => {
+    const result = authorizeWorkflowOrganization({
+      role: "owner",
+      organizationId: "org_a",
+    } as any, "org_a");
+
+    expect(result.currentUser).toBeNull();
+    expect(result.response?.status).toBe(403);
+  });
+  it("blocks unauthenticated Brain/provider API access", async () => {
+    resetLocalSessionsForTests();
+    const response = await getBrainModelSettings(new Request("http://localhost/api/brain/model-settings?org_id=org_demo"));
+    expect(response.status).toBe(401);
+  });
+  it("blocks Brain/provider API access for a different organization", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_brain_a",
+      email: "brain-a@example.com",
+      organizationId: "org_a",
+      organizationName: "Org A",
+      role: "editor",
+    });
+
+    const response = await getBrainModelSettings(new Request("http://localhost/api/brain/model-settings?org_id=org_b", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+
+    expect(response.status).toBe(403);
+  });
+  it("allows authorized Brain/provider API access to reach existing local behavior", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_brain_a",
+      email: "brain-a@example.com",
+      organizationId: "org_a",
+      organizationName: "Org A",
+      role: "editor",
+    });
+
+    const response = await getBrainModelSettings(new Request("http://localhost/api/brain/model-settings?org_id=org_a", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ status: "local", models: [] });
+  });
+  it("uses server current-user identity for Brain/provider actor metadata", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "server_brain_user",
+      email: "brain-user@example.com",
+      organizationId: "org_brain",
+      organizationName: "Brain Org",
+      role: "client_admin",
+    });
+
+    const response = await postBrainLearningLog(new Request("http://localhost/api/brain/learning-log", {
+      method: "POST",
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${session.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        organization_id: "org_brain",
+        user_id: "spoofed_user",
+        approved_by: "spoofed_approver",
+        feedback_text: "Keep renewal claims grounded.",
+      }),
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.item.organization_id).toBe("org_brain");
+    expect(body.item.user_id).toBe("server_brain_user");
+    expect(body.item.approved_by).toBe("server_brain_user");
+  });
+  it("rejects request-supplied Brain/provider organization identity conflicts", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "server_brain_user",
+      email: "brain-user@example.com",
+      organizationId: "org_brain",
+      organizationName: "Brain Org",
+      role: "client_admin",
+    });
+
+    const response = await postBrainLearningLog(new Request("http://localhost/api/brain/learning-log", {
+      method: "POST",
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${session.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        organization_id: "org_other",
+        user_id: "spoofed_user",
+        provider: "OpenAI",
+        text: "safe local auth check",
+      }),
+    }));
+
+    expect(response.status).toBe(403);
+  });
+  it("keeps Brain/provider auth failures secret-safe", async () => {
+    const result = authorizeBrainOrganization(null, "org_demo");
+    const body = await result.response?.json();
+
+    expect(result.response?.status).toBe(401);
+    expect(JSON.stringify(body)).not.toMatch(/openrouter|api[_-]?key|sk-/i);
+  });
+  it("fails Brain/provider authorization closed for unknown roles", async () => {
+    const result = authorizeBrainOrganization({
+      role: "owner",
+      organizationId: "org_a",
+    } as any, "org_a");
+
+    expect(result.currentUser).toBeNull();
+    expect(result.response?.status).toBe(403);
+  });
+  it("blocks draft approval below QA 90", () => {
+    const result = validateDraftApproval({
+      userRole: "CLIENT_ADMIN",
+      draftId: "draft-1",
+      qaScore: QA_APPROVAL_THRESHOLD - 1,
+      spamRisk: "Low",
+      subjectLine1: "First option",
+      subjectLine2: "Second option",
+    });
+    expect(result).toEqual({ error: "QA score below threshold.", status: 400 });
+  });
+  it("allows draft approval at QA 90 or above when otherwise valid", () => {
+    const atThreshold = validateDraftApproval({
+      userRole: "client_admin",
+      draftId: "draft-1",
+      qaScore: QA_APPROVAL_THRESHOLD,
+      spamRisk: "Low",
+      subjectLine1: "First option",
+      subjectLine2: "Second option",
+    });
+    const aboveThreshold = validateDraftApproval({
+      userRole: "REVIEWER",
+      draftId: "draft-2",
+      qaScore: QA_APPROVAL_THRESHOLD + 4,
+      spamRisk: "Medium",
+      subjectLine1: "A practical next step",
+      subjectLine2: "Worth a quick review",
+    });
+    expect("error" in atThreshold).toBe(false);
+    expect("error" in aboveThreshold).toBe(false);
+  });
+  it("maps obvious CSV header aliases to standard import fields", () => {
+    const mapping = inferImportMapping(["contact_email", "account name", "renewal_date", "days_to_renew"]);
+    expect(mapping).toMatchObject({
+      contact_email: "Email",
+      "account name": "Company Name",
+      renewal_date: "Renewal Date",
+      days_to_renew: "Days to Renew",
+    });
+  });
+  it("blocks imports when Email is not mapped", () => {
+    const result = validateImportRows({
+      mapping: { Company: "Company Name" },
+      records: [{ _standard_fields: { "Company Name": "Acme" } }],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({
+      code: "MISSING_REQUIRED_HEADER",
+      field: "Email",
+    }));
+  });
+  it("blocks row-level import records missing Email values", () => {
+    const result = validateImportRows({
+      mapping: { Email: "Email", Company: "Company Name" },
+      records: [
+        { _standard_fields: { Email: "valid@example.com", "Company Name": "Valid Co" } },
+        { _standard_fields: { Email: "", "Company Name": "Missing Email Co" } },
+      ],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({
+      code: "MISSING_REQUIRED_VALUE",
+      field: "Email",
+      rowIndex: 2,
+    }));
+  });
+  it("reports identity and renewal context gaps without blocking Email-valid imports", () => {
+    const mapped = mapImportRecord({ "Email Address": "valid@example.com" }, { "Email Address": "Email" });
+    const result = validateImportRows({
+      mapping: { "Email Address": "Email" },
+      records: [{ _standard_fields: mapped.standard }],
+    });
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "MISSING_IDENTITY" }),
+      expect.objectContaining({ code: "MISSING_RENEWAL_CONTEXT" }),
+    ]));
+  });
+  it("moves campaign board cards into the target column only", () => {
+    const moved = moveCampaignBoardCard(INITIAL_CAMPAIGN_BOARD_CARDS, 3, "Approved");
+    const approvedCards = cardsForCampaignBoardColumn(moved, "Approved").map((card) => card.name);
+    const needsReviewCards = cardsForCampaignBoardColumn(moved, "Needs Review").map((card) => card.name);
+
+    expect(approvedCards).toContain("Carlos Mena");
+    expect(needsReviewCards).not.toContain("Carlos Mena");
+  });
 });
