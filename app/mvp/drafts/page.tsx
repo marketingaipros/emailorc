@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, ShieldAlert, AlertTriangle } from "lucide-react";
+import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, ShieldAlert, AlertTriangle, MailPlus } from "lucide-react";
 import { useNotice } from "@/components/notice/NoticeProvider";
 import { QA_APPROVAL_THRESHOLD } from "@/lib/draft-approval";
 import {
@@ -72,6 +72,12 @@ interface Draft {
   accountContext?: Partial<ManualAccountContext>;
 }
 
+type MicrosoftStatus = {
+  connected: boolean;
+  reconnectRequired?: boolean;
+  storageAvailable?: boolean;
+};
+
 const SPAM_COLOR: Record<string, string> = {
   Low:    "bg-emerald-50 text-emerald-700 border-emerald-200",
   Medium: "bg-amber-50 text-amber-700 border-amber-200",
@@ -122,6 +128,8 @@ export default function DraftsPage() {
   const [feedbackLearning, setFeedbackLearning] = useState(LEARNING_OPTIONS[3]);
   const [feedbackText, setFeedbackText] = useState("");
   const [accountContexts, setAccountContexts] = useState<Record<string, ManualAccountContext>>({});
+  const [microsoftStatus, setMicrosoftStatus] = useState<MicrosoftStatus | null>(null);
+  const [creatingOutlookDraftId, setCreatingOutlookDraftId] = useState<number | string | null>(null);
 
   function accountKey(draft: Draft) {
     return `${draft.company || "company"}:${draft.name || draft.id}`.toLowerCase();
@@ -243,6 +251,10 @@ export default function DraftsPage() {
   }
 
   useEffect(() => {
+    fetch("/api/integrations/microsoft/status")
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => { if (data) setMicrosoftStatus(data); })
+      .catch(() => setMicrosoftStatus({ connected: false, storageAvailable: false }));
     setOffers(loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS));
     setAccountContexts(loadJson<Record<string, ManualAccountContext>>(ACCOUNT_CONTEXT_KEY, {}));
     fetch(`/api/account-intelligence?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}`)
@@ -354,6 +366,30 @@ export default function DraftsPage() {
       notice.success(data.message || "Draft approved successfully", "Draft approved");
     } catch (error: any) {
       notice.error(error.message || "Could not approve draft.", "Approval failed");
+    }
+  };
+
+  const createOutlookDraft = async (draft: Draft) => {
+    if (draft.status !== "Approved") {
+      notice.warning("Only approved drafts can be created in Outlook.", "Outlook draft blocked");
+      return;
+    }
+    setCreatingOutlookDraftId(draft.id);
+    try {
+      const response = await fetch(`/api/drafts/${encodeURIComponent(String(draft.id))}/outlook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization_id: localStorage.getItem("orgId"),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not create Outlook draft.");
+      notice.success("Draft created in Outlook Drafts. Nothing was sent.", "Outlook draft created");
+    } catch (error: any) {
+      notice.error(error.message || "Could not create Outlook draft.", "Outlook draft failed");
+    } finally {
+      setCreatingOutlookDraftId(null);
     }
   };
 
@@ -751,6 +787,20 @@ export default function DraftsPage() {
                     >
                       Reject / Teach Brain
                     </button>
+                    {draft.status === "Approved" && (
+                      <button
+                        onClick={() => createOutlookDraft(draft)}
+                        disabled={!microsoftStatus?.connected || Boolean(microsoftStatus?.reconnectRequired) || creatingOutlookDraftId === draft.id}
+                        title={microsoftStatus?.connected ? "Create Outlook Draft" : "Connect Outlook first"}
+                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                          microsoftStatus?.connected && !microsoftStatus?.reconnectRequired
+                            ? "bg-blue-600 text-white hover:bg-blue-700"
+                            : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                        }`}
+                      >
+                        <MailPlus className="h-4 w-4" /> {creatingOutlookDraftId === draft.id ? "Creating..." : "Create Outlook Draft"}
+                      </button>
+                    )}
                   </div>
 
                   {draft.status !== "Approved" ? (

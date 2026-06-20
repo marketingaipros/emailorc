@@ -2,13 +2,13 @@
 
 **Project:** EmailORC
 **Last updated:** 2026-06-19
-**Current phase:** Sprint 052 planned — Outlook Draft Integration
+**Current phase:** Sprint 052 IMPLEMENTED — awaiting Entra configuration, D1 migration application, and Outlook mailbox UAT
 
 ---
 
 ## Current Status
 
-Sprint 052 is planned: Outlook Draft Integration.
+Sprint 052 status: IMPLEMENTED — awaiting Entra configuration, D1 migration application, and Outlook mailbox UAT.
 
 Goal:
 
@@ -19,11 +19,11 @@ Goal:
 
 Current status:
 
-- Architect Pack prepared.
+- Architect Pack prepared, approved, and implemented for the code/documentation portion of Sprint 052.
 - Mandatory preflight confirmed the current repo root is `/Users/Dmoney/Documents/development/apps/emailorc`.
 - Current planning/docs files listed by the pack are present.
-- Existing D1 migrations run through `0010_app_sessions.sql`; the next available migration number is `0011`.
-- No code, migration, deployment, OAuth secret, or Microsoft configuration change has been made by this sprint plan.
+- Existing D1 migrations run through `0010_app_sessions.sql`; Sprint 052 adds migration text `0011_microsoft_outlook_drafts.sql`.
+- Automated validation passed, but no migration execution, deployment, OAuth secret, Microsoft Entra configuration, or real mailbox connection has been performed.
 
 Sprint 014 is complete and accepted.
 
@@ -93,10 +93,10 @@ EmailORC remains MVP/demo-stage and should not be treated as production-ready.
 
 ## Next Actions
 
-1. Run the Sprint 052 implementation preflight and summarize findings before code changes.
-2. Confirm Microsoft Entra app-registration settings for the dedicated test Outlook account.
-3. Implement Outlook draft creation only after the preflight summary is approved.
-4. Run the approved validation gates and manual Outlook Drafts verification.
+1. Confirm Microsoft Entra app-registration settings for the dedicated test Outlook account.
+2. Apply required D1 migrations only in a future approved database step.
+3. Run manual Outlook Drafts verification after Microsoft configuration and D1 readiness.
+4. Do not mark Sprint 052 PASS until mailbox Drafts, Sent Items, and recipient non-delivery checks are complete.
 5. Apply the Sprint 012 D1 `app_sessions` migration only in a future approved database/deployment step.
 
 ---

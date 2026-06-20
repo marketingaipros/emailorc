@@ -143,6 +143,17 @@ Using the dedicated test mailbox:
 
 Sprint 052 cannot be marked PASS until the manual mailbox check confirms draft creation and no-send behavior.
 
+### Implementation validation status
+
+Automated validation is required after implementation:
+
+- `npm run test`
+- `npm run lint`
+- `npm run test:e2e:safe`
+- `npm run build`
+
+Manual mailbox validation remains blocked until Microsoft Entra app registration, OAuth secrets, D1 migration application in the selected environment, and a dedicated test mailbox are available.
+
 ---
 
 ## Future Validation Areas

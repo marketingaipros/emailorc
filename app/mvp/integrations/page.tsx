@@ -1,7 +1,7 @@
 "use client";
 
-import React from "react";
-import { ExternalLink, Clock, Lock, CheckCircle2, Zap, AlertTriangle, Shield } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { ExternalLink, Clock, Lock, CheckCircle2, Zap, AlertTriangle, Shield, Unplug } from "lucide-react";
 
 type BadgeType = "planned" | "coming-soon" | "manual-now" | "requires-access" | "requires-review";
 
@@ -11,6 +11,15 @@ interface Integration {
   badge: BadgeType;
   icon: string;
 }
+
+type MicrosoftStatus = {
+  connected: boolean;
+  accountHint?: string;
+  connectedAt?: string | null;
+  lastSuccessAt?: string | null;
+  reconnectRequired?: boolean;
+  storageAvailable?: boolean;
+};
 
 const BADGE_CONFIG: Record<BadgeType, { label: string; color: string; icon: React.ReactNode }> = {
   "planned":          { label: "Planned",                      color: "bg-blue-50 text-blue-700 border-blue-200",      icon: <Clock className="h-3 w-3" /> },
@@ -42,9 +51,21 @@ const DATA_INTEGRATIONS: Integration[] = [
   { name: "Webhooks / API",     icon: "WH", badge: "coming-soon",  description: "POST approved draft payloads to any endpoint. Build custom workflows with the Account Growth API." },
 ];
 
-function IntegrationCard({ item }: { item: Integration }) {
+function IntegrationCard({
+  item,
+  microsoftStatus,
+  onMicrosoftDisconnect,
+}: {
+  item: Integration;
+  microsoftStatus?: MicrosoftStatus | null;
+  onMicrosoftDisconnect?: () => void;
+}) {
   const cfg = BADGE_CONFIG[item.badge];
   const isAvailable = item.badge === "manual-now";
+  const isOutlook = item.name === "Outlook / M365";
+  const outlookConnected = isOutlook && microsoftStatus?.connected;
+  const outlookNeedsReconnect = isOutlook && microsoftStatus?.reconnectRequired;
+  const outlookAvailable = isOutlook && microsoftStatus?.storageAvailable !== false;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col gap-4 hover:shadow-md transition-shadow">
@@ -59,18 +80,61 @@ function IntegrationCard({ item }: { item: Integration }) {
       <div className="flex-1">
         <p className="font-semibold text-slate-900 text-sm">{item.name}</p>
         <p className="text-xs text-slate-400 mt-1 leading-relaxed">{item.description}</p>
+        {isOutlook && microsoftStatus ? (
+          <p className="mt-2 text-xs font-semibold text-slate-500">
+            {outlookConnected
+              ? `Connected${microsoftStatus.accountHint ? `: ${microsoftStatus.accountHint}` : ""}`
+              : outlookNeedsReconnect
+                ? "Reconnect required"
+                : "Not connected"}
+          </p>
+        ) : null}
       </div>
-      <button disabled={!isAvailable} className={`w-full rounded-lg py-2 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5
-        ${isAvailable
-          ? "bg-indigo-600 text-white hover:bg-indigo-700"
-          : "bg-slate-100 text-slate-400 cursor-not-allowed"}`}>
-        {isAvailable ? <><ExternalLink className="h-3.5 w-3.5" /> Use Manual Export</> : "Not Yet Available"}
-      </button>
+      {isOutlook ? (
+        <div className="grid grid-cols-1 gap-2">
+          <button
+            disabled={!outlookAvailable}
+            onClick={() => { window.location.href = "/api/integrations/microsoft/connect"; }}
+            className={`w-full rounded-lg py-2 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 ${
+              outlookAvailable ? "bg-indigo-600 text-white hover:bg-indigo-700" : "bg-slate-100 text-slate-400 cursor-not-allowed"
+            }`}
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> {outlookConnected ? "Reconnect Outlook" : "Connect Outlook"}
+          </button>
+          {outlookConnected && (
+            <button
+              onClick={onMicrosoftDisconnect}
+              className="w-full rounded-lg border border-slate-200 bg-white py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 flex items-center justify-center gap-1.5"
+            >
+              <Unplug className="h-3.5 w-3.5" /> Disconnect
+            </button>
+          )}
+        </div>
+      ) : (
+        <button disabled={!isAvailable} className={`w-full rounded-lg py-2 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5
+          ${isAvailable
+            ? "bg-indigo-600 text-white hover:bg-indigo-700"
+            : "bg-slate-100 text-slate-400 cursor-not-allowed"}`}>
+          {isAvailable ? <><ExternalLink className="h-3.5 w-3.5" /> Use Manual Export</> : "Not Yet Available"}
+        </button>
+      )}
     </div>
   );
 }
 
-function Section({ title, subtitle, items }: { title: string; subtitle: string; items: Integration[] }) {
+function Section({
+  title,
+  subtitle,
+  items,
+  microsoftStatus,
+  onMicrosoftDisconnect,
+}: {
+  title: string;
+  subtitle: string;
+  items: Integration[];
+  microsoftStatus?: MicrosoftStatus | null;
+  onMicrosoftDisconnect?: () => void;
+}) {
   return (
     <div className="space-y-4">
       <div>
@@ -78,13 +142,39 @@ function Section({ title, subtitle, items }: { title: string; subtitle: string; 
         <p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {items.map((item) => <IntegrationCard key={item.name} item={item} />)}
+        {items.map((item) => (
+          <IntegrationCard
+            key={item.name}
+            item={item}
+            microsoftStatus={microsoftStatus}
+            onMicrosoftDisconnect={onMicrosoftDisconnect}
+          />
+        ))}
       </div>
     </div>
   );
 }
 
 export default function IntegrationsPage() {
+  const [microsoftStatus, setMicrosoftStatus] = useState<MicrosoftStatus | null>(null);
+
+  function refreshMicrosoftStatus() {
+    fetch("/api/integrations/microsoft/status")
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => { if (data) setMicrosoftStatus(data); })
+      .catch(() => setMicrosoftStatus({ connected: false, storageAvailable: false }));
+  }
+
+  useEffect(() => {
+    refreshMicrosoftStatus();
+  }, []);
+
+  function disconnectMicrosoft() {
+    fetch("/api/integrations/microsoft/disconnect", { method: "POST" })
+      .then(() => refreshMicrosoftStatus())
+      .catch(() => refreshMicrosoftStatus());
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-8">
 
@@ -115,6 +205,8 @@ export default function IntegrationsPage() {
         title="Email Integrations"
         subtitle="Send approved drafts directly through your team's existing email platform."
         items={EMAIL_INTEGRATIONS}
+        microsoftStatus={microsoftStatus}
+        onMicrosoftDisconnect={disconnectMicrosoft}
       />
       <Section
         title="CRM Integrations"

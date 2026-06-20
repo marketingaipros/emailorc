@@ -11,6 +11,18 @@ import { authorizeBrainOrganization } from "../src/lib/brain-auth";
 import { authorizeWorkflowOrganization } from "../src/lib/workflow-auth";
 import { QA_APPROVAL_THRESHOLD, validateDraftApproval } from "../src/lib/draft-approval";
 import { inferImportMapping, mapImportRecord, validateImportRows } from "../src/lib/import-validation";
+import { decryptMicrosoftSecret, encryptMicrosoftSecret } from "../src/lib/microsoft/crypto";
+import {
+  MICROSOFT_GRAPH_SCOPES,
+  assertNoMailSendScope,
+  buildMicrosoftAuthorizeUrl,
+} from "../src/lib/microsoft/oauth";
+import { saveMicrosoftConnection } from "../src/lib/microsoft/connections";
+import {
+  MICROSOFT_GRAPH_CREATE_DRAFT_ENDPOINT,
+  buildOutlookDraftPayload,
+  postMicrosoftGraphDraft,
+} from "../src/lib/microsoft/graph";
 import { isSensitiveRoleAllowed, normalizeRole, permissionsForRole } from "../src/lib/roles";
 import {
   createServerSession,
@@ -26,6 +38,8 @@ import { GET as getAdminSystemHealth } from "../app/api/admin/system-health/rout
 import { POST as postBrainLearningLog } from "../app/api/brain/learning-log/route";
 import { GET as getBrainModelSettings } from "../app/api/brain/model-settings/route";
 import { POST as postDraftApproval } from "../app/api/drafts/approve/route";
+import { POST as postOutlookDraft } from "../app/api/drafts/[draftId]/outlook/route";
+import { GET as getMicrosoftStatus } from "../app/api/integrations/microsoft/status/route";
 import { GET as getWorkflowDrafts } from "../app/api/workflow/drafts/route";
 import { POST as postWorkflowImport } from "../app/api/workflow/import/route";
 import { GET as getWorkflowRecords } from "../app/api/workflow/records/route";
@@ -490,5 +504,144 @@ describe("validation", () => {
 
     expect(approvedCards).toContain("Carlos Mena");
     expect(needsReviewCards).not.toContain("Carlos Mena");
+  });
+  it("keeps Microsoft OAuth scopes draft-only and excludes Mail.Send", () => {
+    expect(MICROSOFT_GRAPH_SCOPES).toContain("https://graph.microsoft.com/Mail.ReadWrite");
+    expect(MICROSOFT_GRAPH_SCOPES.join(" ")).not.toMatch(/Mail\.Send/i);
+    expect(() => assertNoMailSendScope(MICROSOFT_GRAPH_SCOPES)).not.toThrow();
+    expect(() => assertNoMailSendScope(["openid", "https://graph.microsoft.com/Mail.Send"])).toThrow(/Mail\.Send/);
+  });
+  it("builds Microsoft authorization URLs with PKCE and without Mail.Send", () => {
+    const url = buildMicrosoftAuthorizeUrl({
+      clientId: "client-id",
+      redirectUri: "http://localhost:3000/api/integrations/microsoft/callback",
+      state: "safe-state",
+      codeChallenge: "pkce-challenge",
+    });
+
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("scope")).toContain("Mail.ReadWrite");
+    expect(url.searchParams.get("scope")).not.toMatch(/Mail\.Send/i);
+  });
+  it("encrypts Microsoft OAuth material without returning plaintext", async () => {
+    const previous = process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET;
+    process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET = "test-only-microsoft-token-encryption-secret";
+    const encrypted = await encryptMicrosoftSecret("refresh-token-secret");
+    expect(encrypted).not.toContain("refresh-token-secret");
+    await expect(decryptMicrosoftSecret(encrypted)).resolves.toBe("refresh-token-secret");
+    if (previous === undefined) delete process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET;
+    else process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET = previous;
+  });
+  it("fails closed before storing Microsoft OAuth tokens when encryption secret is missing", async () => {
+    const previousMicrosoft = process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET;
+    const previousAuth = process.env.AUTH_SECRET;
+    const previousNextAuth = process.env.NEXTAUTH_SECRET;
+    delete process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET;
+    delete process.env.AUTH_SECRET;
+    delete process.env.NEXTAUTH_SECRET;
+
+    const db = {
+      prepare: () => {
+        throw new Error("db_write_should_not_run");
+      },
+    } as unknown as D1Database;
+
+    await expect(saveMicrosoftConnection({
+      db,
+      currentUser: {
+        userId: "user_ms",
+        email: "status@example.com",
+        organizationId: "org_ms",
+        organizationName: "Microsoft Org",
+        role: "client_admin",
+        environmentMode: "demo",
+      },
+      tokenData: {
+        access_token: "access-token-secret",
+        refresh_token: "refresh-token-secret",
+        expires_in: 3600,
+        scope: "https://graph.microsoft.com/Mail.ReadWrite",
+      },
+    })).rejects.toThrow(/microsoft_encryption_secret_required/);
+
+    if (previousMicrosoft === undefined) delete process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET;
+    else process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET = previousMicrosoft;
+    if (previousAuth === undefined) delete process.env.AUTH_SECRET;
+    else process.env.AUTH_SECRET = previousAuth;
+    if (previousNextAuth === undefined) delete process.env.NEXTAUTH_SECRET;
+    else process.env.NEXTAUTH_SECRET = previousNextAuth;
+  });
+  it("builds Outlook draft payload without send instructions", () => {
+    const payload = buildOutlookDraftPayload({
+      recipientEmail: "buyer@example.com",
+      recipientName: "Buyer",
+      subject: "A practical next step",
+      body: "Hello from EmailORC.",
+    });
+
+    expect(payload).toEqual({
+      subject: "A practical next step",
+      body: { contentType: "Text", content: "Hello from EmailORC." },
+      toRecipients: [{ emailAddress: { address: "buyer@example.com", name: "Buyer" } }],
+    });
+    expect(JSON.stringify(payload)).not.toMatch(/sendMail|\/send|Mail\.Send/i);
+  });
+  it("allows only Microsoft Graph POST /me/messages for draft creation", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fakeFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init || {} });
+      return Response.json({ id: "graph-message-1" });
+    }) as typeof fetch;
+
+    const result = await postMicrosoftGraphDraft({
+      accessToken: "access-token",
+      draft: {
+        recipientEmail: "buyer@example.com",
+        subject: "Subject",
+        body: "Body",
+      },
+      fetchImpl: fakeFetch,
+    });
+
+    expect(result.id).toBe("graph-message-1");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(MICROSOFT_GRAPH_CREATE_DRAFT_ENDPOINT);
+    expect(calls[0].init.method).toBe("POST");
+    await expect(postMicrosoftGraphDraft({
+      accessToken: "access-token",
+      draft: { recipientEmail: "buyer@example.com", subject: "Subject", body: "Body" },
+      endpoint: "https://graph.microsoft.com/v1.0/me/sendMail",
+      fetchImpl: fakeFetch,
+    })).rejects.toThrow(/not_allowed/);
+  });
+  it("keeps Microsoft connection status response token-safe", async () => {
+    resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_ms_status",
+      email: "status@example.com",
+      organizationId: "org_ms",
+      organizationName: "Microsoft Org",
+      role: "client_admin",
+    });
+
+    const response = await getMicrosoftStatus(new Request("http://localhost/api/integrations/microsoft/status", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ connected: false, storageAvailable: false });
+    expect(JSON.stringify(body)).not.toMatch(/access[_-]?token|refresh[_-]?token|client[_-]?secret|authorization/i);
+  });
+  it("blocks unauthenticated Outlook draft creation before storage or Graph access", async () => {
+    resetLocalSessionsForTests();
+    const response = await postOutlookDraft(new Request("http://localhost/api/drafts/draft_1/outlook", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organization_id: "org_a" }),
+    }), { params: { draftId: "draft_1" } });
+
+    expect(response.status).toBe(401);
   });
 });

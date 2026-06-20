@@ -86,7 +86,7 @@ Those routes now use server current-user organization context for authorization 
 
 ## Outlook Draft Integration — Sprint 052
 
-Exact file paths and response shapes must be validated during preflight before implementation.
+Implemented route paths:
 
 ### `GET /api/integrations/microsoft/connect`
 
@@ -99,6 +99,7 @@ Server requirements:
 - Uses the approved delegated Graph scopes only.
 - Redirects to Microsoft authorization endpoint.
 - Must not expose client secret or token material.
+- Uses OAuth state plus PKCE.
 
 ### `GET /api/integrations/microsoft/callback`
 
@@ -111,6 +112,7 @@ Server requirements:
 - Stores encrypted connection material server-side only.
 - Returns to the Integrations screen with safe success/failure status.
 - Never logs authorization code, access token, refresh token, client secret, or message content.
+- Writes safe success/failure audit metadata.
 
 ### `GET /api/integrations/microsoft/status`
 
@@ -136,7 +138,11 @@ Forbidden fields:
 
 Revokes or deletes locally stored connection material for the current authenticated user.
 
-### `POST /api/drafts/{draftId}/outlook`
+Response body:
+
+- `status: "disconnected"`
+
+### `POST /api/drafts/[draftId]/outlook`
 
 Creates an Outlook draft from an already-approved EmailORC draft.
 
@@ -151,6 +157,13 @@ Server requirements:
 - Calls only Microsoft Graph `POST /me/messages`.
 - Returns safe result metadata only, such as EmailORC draft ID, provider message ID, and status.
 - Writes a safe audit event for success or failure.
+
+Response body:
+
+- `status: "created"`
+- `draftId`
+- `provider: "microsoft_outlook"`
+- `providerMessageId`
 
 ---
 

@@ -154,11 +154,13 @@ The `app_sessions` table contract is:
 
 The raw opaque token is stored only in the `emailorc_session` HTTP-only cookie. D1 stores only `token_hash`.
 
-## Outlook Connection and Delivery Tracking — Sprint 052 Target
+## Outlook Connection and Delivery Tracking — Sprint 052
 
-Do not create a migration until implementation preflight confirms the current schema and next migration number. Current repository preflight found D1 migrations through `0010_app_sessions.sql`; the next available migration number is `0011`.
+Sprint 052 adds migration text only: `d1/migrations/0011_microsoft_outlook_drafts.sql`.
 
-Potential minimal D1 entities:
+Do not execute the migration until a separate approved database step.
+
+Minimal D1 entities:
 
 ### `integration_connections`
 

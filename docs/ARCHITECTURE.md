@@ -90,6 +90,13 @@ Never allowed in Sprint 052:
 - shared/admin mailbox behavior
 - Copilot or CRM behavior
 
+Implementation notes:
+
+- OAuth state and PKCE verifier records are stored server-side only.
+- Microsoft connection material is encrypted before persistence.
+- Draft creation reuses the server current-user/session and organization-scoped workflow guard.
+- The Graph adapter exposes a single allowlisted endpoint: `https://graph.microsoft.com/v1.0/me/messages`.
+
 ---
 
 ## Sprint 015 Architecture Direction

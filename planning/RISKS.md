@@ -8,6 +8,7 @@
 | Unapproved EmailORC drafts could be pushed to Outlook. | Medium | High | Recheck approval and authorization server-side in the Outlook draft route. | Active |
 | Personal Microsoft account consent or tenant policy may block testing. | Medium | Medium | Confirm supported account type, redirect URI, delegated permissions, and test-mailbox access before coding. | Open |
 | Token refresh or storage may require schema support. | Medium | Medium | Inspect existing D1 tables/migrations first; add a minimal next-numbered migration only if required. | Open |
+| Sprint 052 migration text is mistaken for an applied D1 migration. | Medium | High | Keep `0011_microsoft_outlook_drafts.sql` documented as migration text only until an approved D1 step applies it. | Active |
 | Existing session migration remains unapplied in D1. | High | Medium | Do not apply migrations in Sprint 052; document whether the connection flow can be tested locally without it. | Open |
 | Outlook work could expand into Copilot or CRM work. | Medium | Medium | Keep Copilot, Salesforce, ColdFusion, and CRM scope explicitly excluded. | Active |
 | App is mistaken for production-ready after Brain/provider guard work. | Medium | High | Continue documenting EmailORC as MVP/demo-stage until full production readiness is validated. | Open |

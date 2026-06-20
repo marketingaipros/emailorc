@@ -32,7 +32,7 @@ test.describe("EmailORC non-mutating smoke gate", () => {
 
   test("unauthenticated protected routes redirect to login without mutating requests", async ({ page }) => {
     const mutatingRequests = collectMutatingRequests(page);
-    const protectedRoutes = ["/", "/dashboard", "/mvp", "/mvp/upload", "/mvp/drafts", "/mvp/campaigns"];
+    const protectedRoutes = ["/", "/dashboard", "/mvp", "/mvp/upload", "/mvp/drafts", "/mvp/campaigns", "/mvp/integrations"];
 
     for (const route of protectedRoutes) {
       await page.goto(route);
