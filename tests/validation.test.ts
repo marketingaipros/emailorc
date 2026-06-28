@@ -15,19 +15,50 @@ import {
 } from "../src/lib/admin-user-guards";
 import { authorizeBrainOrganization } from "../src/lib/brain-auth";
 import { authorizeWorkflowOrganization } from "../src/lib/workflow-auth";
-import { QA_APPROVAL_THRESHOLD, validateDraftApproval } from "../src/lib/draft-approval";
+import {
+  canApproveDraftRole,
+  canExposeOutlookDraftAction,
+  isD1BackedDraftForOutlook,
+  outlookDraftRecipientReadiness,
+  QA_APPROVAL_THRESHOLD,
+  validateDraftApproval,
+} from "../src/lib/draft-approval";
 import { inferImportMapping, mapImportRecord, validateImportRows } from "../src/lib/import-validation";
+import {
+  leadEmailStatus,
+  canManageLifecycle,
+  cleanLeadDisplayValue,
+  draftEligibility,
+  isLikelyScrapedNavigationName,
+  isPlaceholderValue,
+  leadValidationIssues,
+  normalizeDraftSortField,
+  normalizeLifecycleNote,
+  normalizeLifecycleReason,
+  normalizeLeadPage,
+  normalizeLeadPageSize,
+  normalizeLeadSortDirection,
+  normalizeLeadSortField,
+  searchDrafts,
+  sortDrafts,
+  sourceLabel,
+} from "../src/lib/lead-management";
 import { decryptMicrosoftSecret, encryptMicrosoftSecret } from "../src/lib/microsoft/crypto";
 import {
   MICROSOFT_GRAPH_SCOPES,
   assertNoMailSendScope,
   buildMicrosoftAuthorizeUrl,
+  isUsableMicrosoftAccountIdentifier,
+  microsoftAccountIdentifierFromIdToken,
+  microsoftIntegrationsReturnUrl,
+  microsoftRedirectUri,
 } from "../src/lib/microsoft/oauth";
-import { saveMicrosoftConnection } from "../src/lib/microsoft/connections";
+import { saveMicrosoftConnection, safeAccountHint } from "../src/lib/microsoft/connections";
 import {
   MICROSOFT_GRAPH_CREATE_DRAFT_ENDPOINT,
   buildOutlookDraftPayload,
   postMicrosoftGraphDraft,
+  validateOutlookDraftInput,
 } from "../src/lib/microsoft/graph";
 import { isSensitiveRoleAllowed, normalizeAssignableUserRole, normalizeRole, permissionsForRole } from "../src/lib/roles";
 import {
@@ -47,6 +78,7 @@ import { POST as postBrainLearningLog } from "../app/api/brain/learning-log/rout
 import { GET as getBrainModelSettings } from "../app/api/brain/model-settings/route";
 import { POST as postDraftApproval } from "../app/api/drafts/approve/route";
 import { POST as postOutlookDraft } from "../app/api/drafts/[draftId]/outlook/route";
+import { GET as getMicrosoftConnect } from "../app/api/integrations/microsoft/connect/route";
 import { GET as getMicrosoftStatus } from "../app/api/integrations/microsoft/status/route";
 import { GET as getWorkflowDrafts } from "../app/api/workflow/drafts/route";
 import { POST as postWorkflowImport } from "../app/api/workflow/import/route";
@@ -181,12 +213,12 @@ describe("validation", () => {
     });
   });
   it("returns unauthenticated for /api/auth/me without a server session", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const response = await getAuthMe(new Request("http://localhost/api/auth/me?user_id=user_super_admin&role=SUPER_ADMIN"));
     expect(response.status).toBe(401);
   });
   it("resolves /api/auth/me from server session cookie without trusting query identity", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "user_server",
       email: "server@example.com",
@@ -209,10 +241,10 @@ describe("validation", () => {
     expect(body.email).toBe("server@example.com");
     expect(body.role).toBe("client_admin");
     expect(body.organization_id).toBe("org_server");
-    expect(body.session_source).toBe("local_dev_memory");
+    expect(body.session_source).toBe("local_dev_file");
   });
   it("uses opaque session tokens and SHA-256 token hashes", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "user_hash",
       email: "hash@example.com",
@@ -224,6 +256,12 @@ describe("validation", () => {
     expect(session.token).not.toBe(session.tokenHash);
     expect(hashSessionToken(session.token)).toBe(session.tokenHash);
     expect(session.tokenHash).toHaveLength(64);
+
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const localStore = await fs.readFile(path.join(process.cwd(), ".next", "cache", "emailorc-local-sessions.json"), "utf8");
+    expect(localStore).toContain(session.tokenHash);
+    expect(localStore).not.toContain(session.token);
 
     const currentUser = await getCurrentUser(new Request("http://localhost/api/auth/me", {
       headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
@@ -244,7 +282,7 @@ describe("validation", () => {
     expect(httpsCookie).toMatch(/;\s*Secure/i);
   });
   it("logout clears the session cookie and revokes the local server session", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "user_logout",
       email: "logout@example.com",
@@ -268,12 +306,12 @@ describe("validation", () => {
     expect(currentUser).toBeNull();
   });
   it("blocks unauthenticated admin API access", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const response = await getAdminSystemHealth(new Request("http://localhost/api/admin/system-health?organization_id=org_demo&environment=demo"));
     expect(response.status).toBe(401);
   });
   it("blocks authenticated non-super-admin admin API access", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "user_client_admin",
       email: "client-admin@example.com",
@@ -288,7 +326,7 @@ describe("validation", () => {
     expect(response.status).toBe(403);
   });
   it("allows authenticated super-admin admin API access to reach existing behavior", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "user_super_admin",
       email: "super-admin@example.com",
@@ -317,12 +355,12 @@ describe("validation", () => {
     expect(result.response?.status).toBe(403);
   });
   it("blocks unauthenticated workflow API access", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const response = await getWorkflowRecords(new Request("http://localhost/api/workflow/records?organization_id=org_demo&environment=demo"));
     expect(response.status).toBe(401);
   });
   it("blocks workflow API access for a different organization", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "user_org_a",
       email: "org-a@example.com",
@@ -338,7 +376,7 @@ describe("validation", () => {
     expect(response.status).toBe(403);
   });
   it("allows authorized workflow API access to reach existing local behavior", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "user_org_a",
       email: "org-a@example.com",
@@ -356,7 +394,7 @@ describe("validation", () => {
     expect(body).toMatchObject({ status: "local", drafts: [] });
   });
   it("uses server current-user role instead of request-supplied draft approval role", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "server_approver",
       email: "approver@example.com",
@@ -388,7 +426,7 @@ describe("validation", () => {
     expect(body).toMatchObject({ status: "approved", draft_id: "draft-1" });
   });
   it("uses server current-user organization instead of request-supplied import identity", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "server_importer",
       email: "importer@example.com",
@@ -424,12 +462,12 @@ describe("validation", () => {
     expect(result.response?.status).toBe(403);
   });
   it("blocks unauthenticated Brain/provider API access", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const response = await getBrainModelSettings(new Request("http://localhost/api/brain/model-settings?org_id=org_demo"));
     expect(response.status).toBe(401);
   });
   it("blocks Brain/provider API access for a different organization", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "user_brain_a",
       email: "brain-a@example.com",
@@ -445,7 +483,7 @@ describe("validation", () => {
     expect(response.status).toBe(403);
   });
   it("allows authorized Brain/provider API access to reach existing local behavior", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "user_brain_a",
       email: "brain-a@example.com",
@@ -463,7 +501,7 @@ describe("validation", () => {
     expect(body).toMatchObject({ status: "local", models: [] });
   });
   it("uses server current-user identity for Brain/provider actor metadata", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "server_brain_user",
       email: "brain-user@example.com",
@@ -493,7 +531,7 @@ describe("validation", () => {
     expect(body.item.approved_by).toBe("server_brain_user");
   });
   it("rejects request-supplied Brain/provider organization identity conflicts", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "server_brain_user",
       email: "brain-user@example.com",
@@ -565,6 +603,135 @@ describe("validation", () => {
     expect("error" in atThreshold).toBe(false);
     expect("error" in aboveThreshold).toBe(false);
   });
+  it("allows canonical lowercase super_admin in Drafts UI approval affordance", () => {
+    expect(canApproveDraftRole("super_admin")).toBe(true);
+    expect(canApproveDraftRole("SUPER_ADMIN")).toBe(true);
+    expect(canApproveDraftRole("Client Admin")).toBe(true);
+    expect(canApproveDraftRole("reviewer")).toBe(true);
+  });
+  it("fails Drafts UI approval affordance closed for lower privilege or unknown roles", () => {
+    expect(canApproveDraftRole("viewer")).toBe(false);
+    expect(canApproveDraftRole("editor")).toBe(false);
+    expect(canApproveDraftRole("owner")).toBe(false);
+    expect(canApproveDraftRole(null)).toBe(false);
+  });
+  it("classifies valid recipients as ready for Outlook draft creation", () => {
+    expect(outlookDraftRecipientReadiness("buyer@example.com")).toEqual({
+      status: "ready",
+      ready: true,
+      reason: "",
+    });
+  });
+  it("classifies missing recipients as blocked without exposing an address", () => {
+    const result = outlookDraftRecipientReadiness("");
+
+    expect(result).toEqual({
+      status: "missing_recipient",
+      ready: false,
+      reason: "Recipient email is missing.",
+    });
+    expect(result.reason).not.toMatch(/@/);
+  });
+  it("classifies malformed recipients as blocked without exposing the value", () => {
+    const result = outlookDraftRecipientReadiness("not a usable recipient");
+
+    expect(result).toEqual({
+      status: "invalid_recipient",
+      ready: false,
+      reason: "Recipient email is invalid.",
+    });
+    expect(result.reason).not.toContain("not a usable recipient");
+    expect(result.reason).not.toMatch(/@/);
+  });
+  it("exposes Outlook draft action only for approved D1-backed drafts with valid recipients", () => {
+    expect(isD1BackedDraftForOutlook({ isD1Backed: true })).toBe(true);
+    expect(isD1BackedDraftForOutlook({ source: "d1" })).toBe(true);
+    expect(canExposeOutlookDraftAction({ status: "Approved", isD1Backed: true, email: "buyer@example.com" })).toBe(true);
+    expect(canExposeOutlookDraftAction({ status: "Pending Review", isD1Backed: true, email: "buyer@example.com" })).toBe(false);
+    expect(canExposeOutlookDraftAction({ status: "Approved", source: "demo", email: "buyer@example.com" })).toBe(false);
+    expect(canExposeOutlookDraftAction({ status: "Approved", source: "d1" })).toBe(false);
+    expect(canExposeOutlookDraftAction({ status: "Approved", source: "d1", email: "not usable" })).toBe(false);
+  });
+  it("searches Drafts by visible lead name, company, and email", () => {
+    const drafts = [
+      { name: "Test Leads", company: "AI Hub Internal", email: "safe.test@example.com" },
+      { name: "Jordan Lee", company: "Other Co", email: "jordan@example.com" },
+    ];
+
+    expect(searchDrafts(drafts, "test leads")).toHaveLength(1);
+    expect(searchDrafts(drafts, "ai hub")).toHaveLength(1);
+    expect(searchDrafts(drafts, "safe.test")).toHaveLength(1);
+    expect(searchDrafts(drafts, "missing")).toHaveLength(0);
+  });
+  it("sorts Drafts by name, company, status, email readiness, and recency", () => {
+    const drafts = [
+      { name: "Zara", company: "Beta", status: "Pending Review", emailStatus: "Missing", updatedAt: "2026-01-01" },
+      { name: "Ada", company: "Acme", status: "Approved", emailStatus: "Valid", updatedAt: "2026-03-01" },
+      { name: "Milo", company: "Core", status: "Pending Review", emailStatus: "Malformed", updatedAt: "2026-02-01" },
+    ];
+
+    expect(normalizeDraftSortField("company")).toBe("company");
+    expect(normalizeDraftSortField("bad")).toBe("updatedAt");
+    expect(sortDrafts(drafts, "name", "asc").map((draft) => draft.name)).toEqual(["Ada", "Milo", "Zara"]);
+    expect(sortDrafts(drafts, "company", "asc").map((draft) => draft.company)).toEqual(["Acme", "Beta", "Core"]);
+    expect(sortDrafts(drafts, "status", "asc").map((draft) => draft.status)[0]).toBe("Approved");
+    expect(sortDrafts(drafts, "emailReadiness", "desc").map((draft) => draft.emailStatus)[0]).toBe("Valid");
+    expect(sortDrafts(drafts, "updatedAt", "desc").map((draft) => draft.name)[0]).toBe("Ada");
+  });
+  it("requires valid fields before a manual lead becomes draft-ready", () => {
+    expect(draftEligibility({
+      name: "Test Leads",
+      company: "AI Hub Internal",
+      product: "Safe Test Plan",
+      email: "",
+      validationStatus: "VALID",
+    })).toMatchObject({ ready: false, label: "Not Draft Ready" });
+
+    expect(draftEligibility({
+      name: "Test Leads",
+      company: "AI Hub Internal",
+      product: "Safe Test Plan",
+      email: "safe.test@example.com",
+      validationStatus: "VALID",
+    })).toMatchObject({ ready: true, label: "Draft Ready" });
+  });
+  it("recalculates manual-lead draft readiness after lead edits", () => {
+    const before = draftEligibility({
+      name: "Test Leads",
+      company: "AI Hub Internal",
+      product: "",
+      email: "safe.test@example.com",
+      validationStatus: "VALID",
+    });
+    const after = draftEligibility({
+      name: "Test Leads",
+      company: "AI Hub Internal",
+      product: "Safe Test Plan",
+      email: "safe.test@example.com",
+      validationStatus: "VALID",
+    });
+
+    expect(before.ready).toBe(false);
+    expect(before.missing).toContain("product/current plan");
+    expect(after.ready).toBe(true);
+  });
+  it("keeps invalid or missing email blocked for draft and Outlook readiness", () => {
+    expect(draftEligibility({
+      name: "Test Leads",
+      company: "AI Hub Internal",
+      product: "Safe Test Plan",
+      email: "Not found",
+      validationStatus: "VALID",
+    }).ready).toBe(false);
+    expect(canExposeOutlookDraftAction({ status: "Approved", source: "d1", email: "Not found" })).toBe(false);
+  });
+  it("allows approved D1-backed Outlook-draft eligibility for a valid safe test email", () => {
+    expect(canExposeOutlookDraftAction({
+      status: "Approved",
+      source: "d1",
+      email: "safe.test@example.com",
+    })).toBe(true);
+  });
   it("maps obvious CSV header aliases to standard import fields", () => {
     const mapping = inferImportMapping(["contact_email", "account name", "renewal_date", "days_to_renew"]);
     expect(mapping).toMatchObject({
@@ -612,6 +779,68 @@ describe("validation", () => {
       expect.objectContaining({ code: "MISSING_RENEWAL_CONTEXT" }),
     ]));
   });
+  it("classifies lead profile recipient readiness labels", () => {
+    expect(leadEmailStatus("buyer@example.com")).toBe("Valid");
+    expect(leadEmailStatus("")).toBe("Missing");
+    expect(leadEmailStatus("not usable")).toBe("Malformed");
+    expect(leadEmailStatus("Not found")).toBe("Missing");
+  });
+  it("treats imported placeholders and scraped navigation as validation problems", () => {
+    expect(isPlaceholderValue("Not found")).toBe(true);
+    expect(isLikelyScrapedNavigationName("Read Our Blog Toggle Navigation Home About The Stonebriar Difference Our Dentists Jill Wade, DDS")).toBe(true);
+    expect(cleanLeadDisplayValue("Not found")).toBe("");
+    expect(cleanLeadDisplayValue("Read Our Blog Toggle Navigation Home About The Stonebriar Difference Our Dentists Jill Wade, DDS")).toBe("");
+    expect(leadValidationIssues({
+      name: "Not found",
+      email: "Not found",
+      company: "Stonebriar Smile Design",
+      validationStatus: "VALID",
+    })).toEqual(expect.arrayContaining(["Missing or invalid contact name", "Missing email"]));
+  });
+  it("normalizes lead sorting and pagination controls", () => {
+    expect(normalizeLeadPageSize(50)).toBe(50);
+    expect(normalizeLeadPageSize("100")).toBe(100);
+    expect(normalizeLeadPageSize(250)).toBe(250);
+    expect(normalizeLeadPageSize(25)).toBe(50);
+    expect(normalizeLeadPage("3")).toBe(3);
+    expect(normalizeLeadPage("-1")).toBe(1);
+    expect(normalizeLeadSortField("email")).toBe("email");
+    expect(normalizeLeadSortField("bad")).toBe("importedAt");
+    expect(normalizeLeadSortDirection("asc")).toBe("asc");
+    expect(normalizeLeadSortDirection("bad")).toBe("desc");
+  });
+  it("builds non-sensitive lead source labels from import or manual metadata", () => {
+    expect(sourceLabel({ import_batch_id: "batch_1", file_name: "leads.csv" }, {})).toBe("Import: leads.csv");
+    expect(sourceLabel({ import_batch_id: null }, { "Lead Source": "Manual entry" })).toBe("Manual entry");
+    expect(sourceLabel({ import_batch_id: null, source_kind: "demo_fallback" }, {})).toBe("Demo fallback");
+  });
+  it("normalizes lifecycle reasons and lifecycle permissions", () => {
+    expect(normalizeLifecycleReason("wrong source")).toBe("wrong_source");
+    expect(normalizeLifecycleReason("test-demo-cleanup")).toBe("test_demo_cleanup");
+    expect(normalizeLifecycleReason("not-a-reason")).toBeNull();
+    expect(normalizeLifecycleNote("x".repeat(300))).toHaveLength(240);
+    expect(canManageLifecycle("super_admin")).toBe(true);
+    expect(canManageLifecycle("client_admin")).toBe(true);
+    expect(canManageLifecycle("editor")).toBe(false);
+  });
+  it("returns local records response without direct D1 access when database binding is unavailable", async () => {
+    await resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "records_user",
+      email: "records@example.com",
+      organizationId: "org_records",
+      organizationName: "Records Org",
+      role: "editor",
+    });
+
+    const response = await getWorkflowRecords(new Request("http://localhost/api/workflow/records?organization_id=org_records&page_size=250&sort=email", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ status: "local", records: [], total: 0, page: 1, pageSize: 250 });
+  });
   it("moves campaign board cards into the target column only", () => {
     const moved = moveCampaignBoardCard(INITIAL_CAMPAIGN_BOARD_CARDS, 3, "Approved");
     const approvedCards = cardsForCampaignBoardColumn(moved, "Approved").map((card) => card.name);
@@ -638,6 +867,81 @@ describe("validation", () => {
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     expect(url.searchParams.get("scope")).toContain("Mail.ReadWrite");
     expect(url.searchParams.get("scope")).not.toMatch(/Mail\.Send/i);
+  });
+  it("uses configured local Microsoft callback URI when present", async () => {
+    const previous = process.env.MICROSOFT_REDIRECT_URI;
+    process.env.MICROSOFT_REDIRECT_URI = "http://localhost:8787/api/integrations/microsoft/callback";
+
+    await expect(microsoftRedirectUri(new Request("https://localhost:8787/api/integrations/microsoft/connect")))
+      .resolves.toBe("http://localhost:8787/api/integrations/microsoft/callback");
+
+    if (previous === undefined) delete process.env.MICROSOFT_REDIRECT_URI;
+    else process.env.MICROSOFT_REDIRECT_URI = previous;
+  });
+  it("falls back to request-derived Microsoft callback URI when no configured URI exists", async () => {
+    const previous = process.env.MICROSOFT_REDIRECT_URI;
+    delete process.env.MICROSOFT_REDIRECT_URI;
+
+    await expect(microsoftRedirectUri(new Request("http://localhost:8787/api/integrations/microsoft/connect")))
+      .resolves.toBe("http://localhost:8787/api/integrations/microsoft/callback");
+
+    if (previous === undefined) delete process.env.MICROSOFT_REDIRECT_URI;
+    else process.env.MICROSOFT_REDIRECT_URI = previous;
+  });
+  it("builds local Microsoft callback return URL from configured HTTP origin", async () => {
+    const previous = process.env.MICROSOFT_REDIRECT_URI;
+    process.env.MICROSOFT_REDIRECT_URI = "http://localhost:8787/api/integrations/microsoft/callback";
+
+    const url = await microsoftIntegrationsReturnUrl(
+      new Request("https://localhost:8787/api/integrations/microsoft/callback"),
+      "connected",
+    );
+
+    expect(url.toString()).toBe("http://localhost:8787/mvp/integrations?microsoft=connected");
+    expect(url.protocol).toBe("http:");
+
+    if (previous === undefined) delete process.env.MICROSOFT_REDIRECT_URI;
+    else process.env.MICROSOFT_REDIRECT_URI = previous;
+  });
+  it("extracts Microsoft mailbox identity from safe id_token claims in approved order", () => {
+    const makeIdToken = (claims: Record<string, unknown>) => [
+      Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url"),
+      Buffer.from(JSON.stringify(claims)).toString("base64url"),
+      "signature",
+    ].join(".");
+
+    expect(microsoftAccountIdentifierFromIdToken(makeIdToken({
+      email: "outlook-primary@example.com",
+      preferred_username: "outlook-preferred@example.com",
+      upn: "outlook-upn@example.com",
+    }))).toBe("outlook-primary@example.com");
+    expect(microsoftAccountIdentifierFromIdToken(makeIdToken({
+      preferred_username: "outlook-preferred@example.com",
+      upn: "outlook-upn@example.com",
+    }))).toBe("outlook-preferred@example.com");
+    expect(microsoftAccountIdentifierFromIdToken(makeIdToken({
+      email: "not usable",
+      preferred_username: "also-not-usable",
+      upn: "outlook-upn@example.com",
+    }))).toBe("outlook-upn@example.com");
+  });
+  it("rejects missing or invalid Microsoft id_token mailbox claims", () => {
+    const makeIdToken = (claims: Record<string, unknown>) => [
+      Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url"),
+      Buffer.from(JSON.stringify(claims)).toString("base64url"),
+      "signature",
+    ].join(".");
+
+    expect(isUsableMicrosoftAccountIdentifier("valid.user@example.com")).toBe(true);
+    expect(isUsableMicrosoftAccountIdentifier("missing-domain")).toBe(false);
+    expect(isUsableMicrosoftAccountIdentifier("bad value@example.com")).toBe(false);
+    expect(isUsableMicrosoftAccountIdentifier("user@example")).toBe(false);
+    expect(microsoftAccountIdentifierFromIdToken("not-a-jwt")).toBe("");
+    expect(microsoftAccountIdentifierFromIdToken(makeIdToken({
+      email: "admin demo",
+      preferred_username: "placeholder",
+      upn: "",
+    }))).toBe("");
   });
   it("encrypts Microsoft OAuth material without returning plaintext", async () => {
     const previous = process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET;
@@ -687,6 +991,43 @@ describe("validation", () => {
     if (previousNextAuth === undefined) delete process.env.NEXTAUTH_SECRET;
     else process.env.NEXTAUTH_SECRET = previousNextAuth;
   });
+  it("does not use the EmailORC user email as a Microsoft mailbox fallback", async () => {
+    const previous = process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET;
+    process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET = "test-only-microsoft-token-encryption-secret";
+    let savedAccountHint: unknown = undefined;
+    const db = {
+      prepare: () => ({
+        bind: (...values: unknown[]) => {
+          savedAccountHint = values[4];
+          return { run: async () => ({ success: true }) };
+        },
+      }),
+    } as unknown as D1Database;
+
+    await saveMicrosoftConnection({
+      db,
+      currentUser: {
+        userId: "user_ms",
+        email: "admin@demo.com",
+        organizationId: "org_ms",
+        organizationName: "Microsoft Org",
+        role: "client_admin",
+        environmentMode: "demo",
+      },
+      tokenData: {
+        access_token: "access-token-secret",
+        refresh_token: "refresh-token-secret",
+        expires_in: 3600,
+        scope: "https://graph.microsoft.com/Mail.ReadWrite",
+      },
+    });
+
+    expect(savedAccountHint).toBe("");
+    expect(savedAccountHint).not.toBe(safeAccountHint("admin@demo.com"));
+
+    if (previous === undefined) delete process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET;
+    else process.env.MICROSOFT_TOKEN_ENCRYPTION_SECRET = previous;
+  });
   it("builds Outlook draft payload without send instructions", () => {
     const payload = buildOutlookDraftPayload({
       recipientEmail: "buyer@example.com",
@@ -701,6 +1042,18 @@ describe("validation", () => {
       toRecipients: [{ emailAddress: { address: "buyer@example.com", name: "Buyer" } }],
     });
     expect(JSON.stringify(payload)).not.toMatch(/sendMail|\/send|Mail\.Send/i);
+  });
+  it("keeps API validation blocking missing and malformed recipients if UI logic is bypassed", () => {
+    expect(validateOutlookDraftInput({
+      recipientEmail: "",
+      subject: "A practical next step",
+      body: "Hello from EmailORC.",
+    })).toEqual({ error: "Valid recipient email is required.", status: 400 });
+    expect(validateOutlookDraftInput({
+      recipientEmail: "not a usable recipient",
+      subject: "A practical next step",
+      body: "Hello from EmailORC.",
+    })).toEqual({ error: "Valid recipient email is required.", status: 400 });
   });
   it("allows only Microsoft Graph POST /me/messages for draft creation", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -731,7 +1084,7 @@ describe("validation", () => {
     })).rejects.toThrow(/not_allowed/);
   });
   it("keeps Microsoft connection status response token-safe", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const session = await createServerSession(null, {
       userId: "user_ms_status",
       email: "status@example.com",
@@ -749,8 +1102,39 @@ describe("validation", () => {
     expect(body).toMatchObject({ connected: false, storageAvailable: false });
     expect(JSON.stringify(body)).not.toMatch(/access[_-]?token|refresh[_-]?token|client[_-]?secret|authorization/i);
   });
+  it("does not authenticate Microsoft Connect from local display identity alone", async () => {
+    await resetLocalSessionsForTests();
+    const response = await getMicrosoftConnect(new Request("http://localhost/api/integrations/microsoft/connect?user_id=user_super_admin&role=SUPER_ADMIN", {
+      headers: {
+        "x-user-role": "SUPER_ADMIN",
+        "x-user-id": "user_super_admin",
+      },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body).toEqual({ error: "Authentication required." });
+  });
+  it("allows valid server session to reach existing Microsoft Connect behavior without completing OAuth", async () => {
+    await resetLocalSessionsForTests();
+    const session = await createServerSession(null, {
+      userId: "user_ms_connect",
+      email: "connect@example.com",
+      organizationId: "org_ms",
+      organizationName: "Microsoft Org",
+      role: "client_admin",
+    });
+
+    const response = await getMicrosoftConnect(new Request("http://localhost/api/integrations/microsoft/connect", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}` },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({ error: "Microsoft connection requires D1 storage." });
+  });
   it("blocks unauthenticated Outlook draft creation before storage or Graph access", async () => {
-    resetLocalSessionsForTests();
+    await resetLocalSessionsForTests();
     const response = await postOutlookDraft(new Request("http://localhost/api/drafts/draft_1/outlook", {
       method: "POST",
       headers: { "content-type": "application/json" },

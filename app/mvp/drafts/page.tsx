@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, ShieldAlert, AlertTriangle, MailPlus } from "lucide-react";
+import { CheckCircle, RefreshCw, Copy, ChevronDown, ChevronUp, ShieldAlert, AlertTriangle, MailPlus, Search } from "lucide-react";
 import { useNotice } from "@/components/notice/NoticeProvider";
-import { QA_APPROVAL_THRESHOLD } from "@/lib/draft-approval";
+import { canApproveDraftRole, canExposeOutlookDraftAction, isD1BackedDraftForOutlook, outlookDraftRecipientReadiness, QA_APPROVAL_THRESHOLD } from "@/lib/draft-approval";
+import { normalizeDraftSortField, searchDrafts, sortDrafts, type DraftSortField, type LeadSortDirection } from "@/lib/lead-management";
 import {
   ACCOUNT_CONTEXT_KEY,
   DEFAULT_OFFERS,
@@ -49,8 +50,13 @@ const EMPTY_ACCOUNT_CONTEXT: ManualAccountContext = {
 interface Draft {
   id: number | string;
   name: string;
+  rawName?: string;
   company: string;
+  rawCompany?: string;
   product: string;
+  email?: string;
+  rawEmail?: string;
+  emailStatus?: string;
   subject1: string;
   subject2: string;
   previewText: string;
@@ -70,6 +76,26 @@ interface Draft {
   offerName?: string;
   campaignPlaybook?: string;
   accountContext?: Partial<ManualAccountContext>;
+  isD1Backed?: boolean;
+  source?: string;
+  storageSource?: string;
+  sourceLabel?: string;
+  sourceFile?: string;
+  importBatchId?: string;
+  sourceRowId?: string;
+  importedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  validationIssues?: string[];
+  hasValidationProblems?: boolean;
+  draftEligibility?: {
+    ready: boolean;
+    label: string;
+    reason: string;
+    missing: string[];
+    emailStatus: string;
+  };
+  draftReadyLeadOnly?: boolean;
 }
 
 type MicrosoftStatus = {
@@ -130,6 +156,12 @@ export default function DraftsPage() {
   const [accountContexts, setAccountContexts] = useState<Record<string, ManualAccountContext>>({});
   const [microsoftStatus, setMicrosoftStatus] = useState<MicrosoftStatus | null>(null);
   const [creatingOutlookDraftId, setCreatingOutlookDraftId] = useState<number | string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  const [currentUserLoaded, setCurrentUserLoaded] = useState(false);
+  const [serverAuthenticated, setServerAuthenticated] = useState(false);
+  const [search, setSearch] = useState("");
+  const [sortField, setSortField] = useState<DraftSortField>("updatedAt");
+  const [sortDirection, setSortDirection] = useState<LeadSortDirection>("desc");
 
   function accountKey(draft: Draft) {
     return `${draft.company || "company"}:${draft.name || draft.id}`.toLowerCase();
@@ -210,9 +242,10 @@ export default function DraftsPage() {
   }
 
   function approvalBlockReason(draft: Draft) {
-    const role = localStorage.getItem("userRole") || "VIEWER";
     if (draft.status === "Approved") return "Draft already approved";
-    if (!["SUPER_ADMIN", "CLIENT_ADMIN", "REVIEWER"].includes(role)) return "User does not have approval permission";
+    if (draft.draftReadyLeadOnly) return "Save this lead in Records to create a reviewable draft row";
+    if (!currentUserLoaded) return "Checking approval permission";
+    if (!canApproveDraftRole(currentUserRole)) return "User does not have approval permission";
     if (!draft.name || !draft.company || !draft.body || !draft.subject1 || !draft.subject2) return "Draft missing required fields";
     if (draft.subject1.trim().toLowerCase() === draft.subject2.trim().toLowerCase()) return "Duplicate subject lines";
     if (INTERNAL_SUBJECT_WORDS.some((word) => draft.subject2.toLowerCase().includes(word))) return "Subject Line 2 uses internal language";
@@ -222,6 +255,11 @@ export default function DraftsPage() {
     if (draft.qaScore < QA_APPROVAL_THRESHOLD) return "QA score below threshold";
     if (!["Low", "Medium"].includes(draft.spamRisk)) return "Draft spam risk is too high";
     return "";
+  }
+
+  function outlookRecipientBlockReason(draft: Draft) {
+    const readiness = outlookDraftRecipientReadiness(draft.email);
+    return readiness.ready ? "" : readiness.reason;
   }
 
   function persistAllDrafts(nextDrafts: Draft[]) {
@@ -251,8 +289,25 @@ export default function DraftsPage() {
   }
 
   useEffect(() => {
-    fetch("/api/integrations/microsoft/status")
+    fetch("/api/auth/me")
       .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        setServerAuthenticated(Boolean(data));
+        setCurrentUserRole(data?.role || null);
+      })
+      .catch(() => {
+        setServerAuthenticated(false);
+        setCurrentUserRole(null);
+      })
+      .finally(() => setCurrentUserLoaded(true));
+    fetch("/api/integrations/microsoft/status")
+      .then((response) => {
+        if (response.status === 401) {
+          setServerAuthenticated(false);
+          return { connected: false, storageAvailable: true };
+        }
+        return response.ok ? response.json() : null;
+      })
       .then((data) => { if (data) setMicrosoftStatus(data); })
       .catch(() => setMicrosoftStatus({ connected: false, storageAvailable: false }));
     setOffers(loadJsonArray(OFFER_LIBRARY_KEY, DEFAULT_OFFERS));
@@ -270,64 +325,70 @@ export default function DraftsPage() {
       })
       .catch(() => {});
     const environment = currentEnvironment();
-    if (!demoDataAllowed()) setDrafts([]);
+    const loadFallbackDrafts = () => {
+      if (!demoDataAllowed()) {
+        setDrafts([]);
+        return;
+      }
+      const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
+      const savedState = localStorage.getItem(DRAFT_STATE_KEY);
+      const stateById = savedState ? JSON.parse(savedState) : {};
+      const demoDrafts = DEMO_DRAFTS.map((draft) => ({ ...draft, sourceLabel: "Demo fallback", ...(stateById[String(draft.id)] || {}) }));
+      if (!saved) {
+        setDrafts(demoDrafts);
+        return;
+      }
+      try {
+        const uploaded = JSON.parse(saved).map((row: any, index: number) => {
+          const subject1 = row._subject || row.subject1 || "";
+          const subject2 = row._subject2 || row.subject2 || `${row._company || row.Company || "Your team"}: a softer next step`;
+          const duplicateSubjects = subject1.trim().toLowerCase() === subject2.trim().toLowerCase();
+          return {
+            id: 1000 + index,
+            name: row._name || row.Name || row.name || "Missing Name",
+            company: row._company || row.Company || row.company || "Company",
+            product: row._product || row["Current Product"] || row.Product || "Current Plan",
+            subject1,
+            subject2,
+            previewText: row._preview || "",
+            body: row._body || "",
+            cta: row._cta || "Would it be worth a quick 10-minute review?",
+            personalization: ["Contact Name", "Company Name", "Current Product", "Renewal Timing", "Offer", "Pain Point"],
+            qaScore: duplicateSubjects ? Math.min(Number(row._score || 0), 89) : row._score || 0,
+            spamRisk: row._spam === "Blocked" ? "High" : row._spam || "Low",
+            status: row._status === "Approved" && !duplicateSubjects ? "Approved" : "Pending Review",
+            expanded: false,
+            revisionCount: row._revision_count || 0,
+            qaIssues: duplicateSubjects ? ["Duplicate subject lines"] : row._qa_issues || [],
+            revisionsMade: row._revisions_made || [],
+            sourceIndex: index,
+            aiContext: row._ai_context,
+            customFields: row._custom_fields || {},
+            accountContext: row._account_context || row.accountContext || undefined,
+            offerName: row._ai_context?.offerUsed,
+            campaignPlaybook: row._ai_context?.campaignPlaybookUsed,
+            sourceLabel: "Browser fallback",
+          };
+        });
+        const mergedUploaded = uploaded
+          .filter((draft: Draft) => !/practical next steps|unlock enterprise-level growth|pro \+ analytics/i.test(`${draft.subject1} ${draft.body}`))
+          .map((draft: Draft) => ({ ...draft, ...(stateById[String(draft.id)] || {}) }));
+        setDrafts(mergedUploaded.length ? mergedUploaded : demoDrafts);
+      } catch {
+        setDrafts(demoDataAllowed() ? demoDrafts : []);
+      }
+    };
+
     fetch(`/api/workflow/drafts?organization_id=${encodeURIComponent(localStorage.getItem("orgId") || "org_demo")}&environment=${encodeURIComponent(environment)}`)
       .then((response) => response.json())
       .then((data) => {
-        if (data.status === "success") {
+        if (data.status === "success" && (data.drafts || []).length) {
           setDrafts(data.drafts || []);
+          return;
         }
+        loadFallbackDrafts();
       })
-      .catch(() => {});
-
-    if (!demoDataAllowed()) return;
-
-    const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
-    const savedState = localStorage.getItem(DRAFT_STATE_KEY);
-    const stateById = savedState ? JSON.parse(savedState) : {};
-    const demoDrafts = DEMO_DRAFTS.map((draft) => ({ ...draft, ...(stateById[String(draft.id)] || {}) }));
-    if (!saved) {
-      setDrafts(demoDrafts);
-      return;
-    }
-    try {
-      const uploaded = JSON.parse(saved).map((row: any, index: number) => {
-        const subject1 = row._subject || row.subject1 || "";
-        const subject2 = row._subject2 || row.subject2 || `${row._company || row.Company || "Your team"}: a softer next step`;
-        const duplicateSubjects = subject1.trim().toLowerCase() === subject2.trim().toLowerCase();
-        return {
-        id: 1000 + index,
-        name: row._name || row.Name || row.name || "Missing Name",
-        company: row._company || row.Company || row.company || "Company",
-        product: row._product || row["Current Product"] || row.Product || "Current Plan",
-        subject1,
-        subject2,
-        previewText: row._preview || "",
-        body: row._body || "",
-        cta: row._cta || "Would it be worth a quick 10-minute review?",
-        personalization: ["Contact Name", "Company Name", "Current Product", "Renewal Timing", "Offer", "Pain Point"],
-        qaScore: duplicateSubjects ? Math.min(Number(row._score || 0), 89) : row._score || 0,
-        spamRisk: row._spam === "Blocked" ? "High" : row._spam || "Low",
-        status: row._status === "Approved" && !duplicateSubjects ? "Approved" : "Pending Review",
-        expanded: false,
-        revisionCount: row._revision_count || 0,
-        qaIssues: duplicateSubjects ? ["Duplicate subject lines"] : row._qa_issues || [],
-        revisionsMade: row._revisions_made || [],
-        sourceIndex: index,
-        aiContext: row._ai_context,
-        customFields: row._custom_fields || {},
-        accountContext: row._account_context || row.accountContext || undefined,
-        offerName: row._ai_context?.offerUsed,
-        campaignPlaybook: row._ai_context?.campaignPlaybookUsed,
-      };
-      });
-      const mergedUploaded = uploaded
-        .filter((draft: Draft) => !/practical next steps|unlock enterprise-level growth|pro \\+ analytics/i.test(`${draft.subject1} ${draft.body}`))
-        .map((draft: Draft) => ({ ...draft, ...(stateById[String(draft.id)] || {}) }));
-      setDrafts(mergedUploaded.length ? mergedUploaded : demoDrafts);
-    } catch {
-      setDrafts(demoDataAllowed() ? DEMO_DRAFTS : []);
-    }
+      .catch(() => loadFallbackDrafts());
   }, []);
 
   const toggle = (id: number | string) =>
@@ -351,7 +412,6 @@ export default function DraftsPage() {
           spam_risk: draft.spamRisk,
           subject_line_1: draft.subject1,
           subject_line_2: draft.subject2,
-          user_role: localStorage.getItem("userRole"),
           user_id: localStorage.getItem("userId"),
           organization_id: localStorage.getItem("orgId"),
         }),
@@ -370,8 +430,21 @@ export default function DraftsPage() {
   };
 
   const createOutlookDraft = async (draft: Draft) => {
+    if (!serverAuthenticated) {
+      notice.warning("Sign in again before creating Outlook drafts.", "Outlook draft blocked");
+      return;
+    }
     if (draft.status !== "Approved") {
       notice.warning("Only approved drafts can be created in Outlook.", "Outlook draft blocked");
+      return;
+    }
+    if (!isD1BackedDraftForOutlook(draft)) {
+      notice.warning("Outlook draft creation requires a real D1-backed approved draft.", "Outlook draft blocked");
+      return;
+    }
+    const recipientBlockReason = outlookRecipientBlockReason(draft);
+    if (recipientBlockReason) {
+      notice.warning(recipientBlockReason, "Outlook draft blocked");
       return;
     }
     setCreatingOutlookDraftId(draft.id);
@@ -394,6 +467,10 @@ export default function DraftsPage() {
   };
 
   const regenerate = async (id: number | string) => {
+    if (!serverAuthenticated) {
+      notice.warning("Sign in again before regenerating protected drafts.", "Regenerate blocked");
+      return;
+    }
     const draft = drafts.find((item) => item.id === id);
     if (!draft) return;
     setRegeneratingId(id);
@@ -494,6 +571,23 @@ export default function DraftsPage() {
 
   const subjectFor = (d: Draft) => activeSubject[String(d.id)] === 2 ? d.subject2 : d.subject1;
   const activeOffers = offers.filter((offer) => offer.status === "Active" || offer.status === "Approved");
+  const visibleDrafts = sortDrafts(searchDrafts(drafts, search), sortField, sortDirection) as Draft[];
+  const activeSortLabel = {
+    updatedAt: "Most recent",
+    name: "Name",
+    company: "Company",
+    status: "Draft status",
+    emailReadiness: "Email readiness",
+  }[sortField];
+
+  function updateSort(field: DraftSortField) {
+    if (sortField === field) {
+      setSortDirection((current) => current === "asc" ? "desc" : "asc");
+      return;
+    }
+    setSortField(field);
+    setSortDirection(field === "updatedAt" ? "desc" : "asc");
+  }
 
   const approved = drafts.filter((d) => d.status === "Approved").length;
   const pending  = drafts.filter((d) => d.status === "Pending Review").length;
@@ -514,12 +608,47 @@ export default function DraftsPage() {
         </div>
       </div>
 
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-100 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+        <div className="relative w-full md:max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search drafts by name, company, or email..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-4 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-slate-500">Sort: {activeSortLabel} {sortDirection === "asc" ? "↑" : "↓"}</span>
+          {[
+            ["updatedAt", "Most recent"],
+            ["name", "Name"],
+            ["company", "Company"],
+            ["status", "Draft status"],
+            ["emailReadiness", "Email readiness"],
+          ].map(([field, label]) => (
+            <button
+              key={field}
+              onClick={() => updateSort(normalizeDraftSortField(field))}
+              className={`rounded-lg border px-3 py-2 text-xs font-bold transition-colors ${
+                sortField === field ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Draft Cards */}
       <div className="space-y-4">
-        {drafts.map((draft) => (
+        {visibleDrafts.map((draft) => (
           (() => {
             const issues = buildQaIssues(draft);
             const blockReason = approvalBlockReason(draft);
+            const outlookRecipientReason = outlookRecipientBlockReason(draft);
+            const showOutlookRecipientBlocked = draft.status === "Approved" && isD1BackedDraftForOutlook(draft) && Boolean(outlookRecipientReason);
             return (
           <div
             key={draft.id}
@@ -536,8 +665,21 @@ export default function DraftsPage() {
                   {draft.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
                 </div>
                 <div>
-                  <p className="font-semibold text-slate-900">{draft.name}</p>
+                  <p className={`font-semibold ${draft.hasValidationProblems ? "text-amber-800" : "text-slate-900"}`}>{draft.name}</p>
                   <p className="text-xs text-slate-400">{draft.company} · {draft.product}</p>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${draft.sourceLabel === "Demo fallback" ? "border-purple-200 bg-purple-50 text-purple-700" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+                      {draft.sourceLabel || draft.source || "Source unknown"}
+                    </span>
+                    {draft.importBatchId && <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-500">Batch {draft.importBatchId}</span>}
+                    {draft.validationIssues?.length ? <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Validation problem</span> : null}
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${draft.draftEligibility?.ready ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+                      {draft.draftEligibility?.label || (draft.emailStatus === "Valid" ? "Draft Ready" : "Not Draft Ready")}
+                    </span>
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${draft.emailStatus === "Valid" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"}`}>
+                      Email: {draft.emailStatus || "Missing"}
+                    </span>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -590,6 +732,18 @@ export default function DraftsPage() {
                       <AlertTriangle className="h-4 w-4" /> Duplicate subject lines
                     </div>
                   )}
+                </div>
+
+                {/* Preview Text */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                  <p><span className="font-bold">Source:</span> {draft.sourceLabel || draft.source || "Source unknown"}</p>
+                  <p><span className="font-bold">Import batch:</span> {draft.importBatchId || "None"}</p>
+                  <p><span className="font-bold">Source row:</span> {draft.sourceRowId || "None"}</p>
+                  <p><span className="font-bold">Validation:</span> {draft.validationIssues?.length ? draft.validationIssues.join("; ") : "No visible source-data issues"}</p>
+                  <p><span className="font-bold">Draft eligibility:</span> {draft.draftEligibility?.reason || (draft.emailStatus === "Valid" ? "Eligible for Email Drafts." : "Missing a valid recipient email.")}</p>
+                  {draft.draftReadyLeadOnly && <p className="font-bold text-amber-700">This lead is visible because it is draft-ready, but it needs one Records save to create the reviewable D1 draft row.</p>}
+                  {draft.rawName && draft.rawName !== draft.name && <p><span className="font-bold">Raw contact value:</span> {draft.rawName}</p>}
+                  {draft.rawEmail && draft.emailStatus !== "Valid" && <p><span className="font-bold">Raw email value:</span> {draft.rawEmail}</p>}
                 </div>
 
                 {/* Preview Text */}
@@ -776,7 +930,8 @@ export default function DraftsPage() {
                     </button>
                     <button
                       onClick={() => regenerate(draft.id)}
-                      disabled={regeneratingId === draft.id}
+                      disabled={!currentUserLoaded || !serverAuthenticated || regeneratingId === draft.id}
+                      title={!currentUserLoaded ? "Checking session" : !serverAuthenticated ? "Sign in again to regenerate" : "Regenerate Email"}
                       className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
                     >
                       <RefreshCw className={`h-4 w-4 ${regeneratingId === draft.id ? "animate-spin" : ""}`} /> {regeneratingId === draft.id ? "Regenerating..." : "Regenerate Email"}
@@ -787,19 +942,27 @@ export default function DraftsPage() {
                     >
                       Reject / Teach Brain
                     </button>
-                    {draft.status === "Approved" && (
+                    {canExposeOutlookDraftAction(draft) && (
                       <button
                         onClick={() => createOutlookDraft(draft)}
-                        disabled={!microsoftStatus?.connected || Boolean(microsoftStatus?.reconnectRequired) || creatingOutlookDraftId === draft.id}
-                        title={microsoftStatus?.connected ? "Create Outlook Draft" : "Connect Outlook first"}
+                        disabled={!currentUserLoaded || !serverAuthenticated || !microsoftStatus?.connected || Boolean(microsoftStatus?.reconnectRequired) || creatingOutlookDraftId === draft.id}
+                        title={!currentUserLoaded ? "Checking session" : !serverAuthenticated ? "Sign in again before creating Outlook drafts" : microsoftStatus?.connected ? "Create Outlook Draft" : "Connect Outlook first"}
                         className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                          microsoftStatus?.connected && !microsoftStatus?.reconnectRequired
+                          serverAuthenticated && microsoftStatus?.connected && !microsoftStatus?.reconnectRequired
                             ? "bg-blue-600 text-white hover:bg-blue-700"
                             : "bg-slate-100 text-slate-400 cursor-not-allowed"
                         }`}
                       >
                         <MailPlus className="h-4 w-4" /> {creatingOutlookDraftId === draft.id ? "Creating..." : "Create Outlook Draft"}
                       </button>
+                    )}
+                    {showOutlookRecipientBlocked && (
+                      <span
+                        title={outlookRecipientReason}
+                        className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700"
+                      >
+                        <AlertTriangle className="h-4 w-4" /> {outlookRecipientReason}
+                      </span>
                     )}
                   </div>
 
@@ -852,6 +1015,13 @@ export default function DraftsPage() {
             );
           })()
         ))}
+        {visibleDrafts.length === 0 && (
+          <div className="flex flex-col items-center justify-center rounded-xl border border-slate-100 bg-white py-16 text-slate-400 shadow-sm">
+            <Search className="mb-3 h-10 w-10" />
+            <p className="text-sm font-semibold text-slate-600">No email drafts match your search or sort filters.</p>
+            <p className="mt-1 text-xs">Search checks the currently loaded draft names, companies, and email addresses.</p>
+          </div>
+        )}
       </div>
     </div>
   );

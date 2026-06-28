@@ -104,7 +104,7 @@
         {
           "binding": "DB",
           "database_name": "emailorc-production-db",
-          "database_id": "replace-with-production-d1-database-id",
+          "database_id": "0a818383-9aa7-4f3a-be2f-375f6f933d85",
           "migrations_dir": "d1/migrations"
         }
       ]

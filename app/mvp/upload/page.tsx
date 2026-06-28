@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
-import { CheckCircle, FileText, Loader2, PlusCircle, RefreshCw, Save, ShieldCheck, UploadCloud, Zap } from "lucide-react";
+import { Archive, CheckCircle, FileText, Loader2, PlusCircle, RefreshCw, RotateCcw, Save, ShieldCheck, UploadCloud, Zap } from "lucide-react";
 import { useNotice } from "@/components/notice/NoticeProvider";
 import {
   APP_MINDSET_KEY,
@@ -37,6 +37,33 @@ import {
 
 const DRAFT_STORAGE_KEY = "emailorcGeneratedDrafts";
 const QA_APPROVAL_THRESHOLD = 90;
+
+type ImportBatchSummary = {
+  id: string;
+  file_name?: string;
+  total_records?: number;
+  lead_count?: number;
+  archived_lead_count?: number;
+  status?: string;
+  created_at?: string;
+  archived_at?: string | null;
+  archive_reason?: string | null;
+};
+
+type LifecycleAuditSummary = {
+  action: string;
+  target_type: string;
+  target_id: string;
+  created_at: string;
+  metadata?: {
+    reason?: string;
+    previousState?: string;
+    nextState?: string;
+    fileName?: string | null;
+    batchId?: string;
+    leadId?: string;
+  };
+};
 
 const EMPTY_ACCOUNT_CONTEXT: ManualAccountContext = {
   rawText: "",
@@ -114,6 +141,10 @@ export default function UploadPage() {
   const [offers, setOffers] = useState<OfferItem[]>(DEFAULT_OFFERS);
   const [voiceMemory, setVoiceMemory] = useState<VoiceMemory>(DEFAULT_VOICE_MEMORY);
   const [bulkAccountContext, setBulkAccountContext] = useState<ManualAccountContext>(EMPTY_ACCOUNT_CONTEXT);
+  const [imports, setImports] = useState<ImportBatchSummary[]>([]);
+  const [lifecycleAudit, setLifecycleAudit] = useState<LifecycleAuditSummary[]>([]);
+  const [showArchivedImports, setShowArchivedImports] = useState(false);
+  const [lifecycleReason, setLifecycleReason] = useState("test_demo_cleanup");
 
   useEffect(() => {
     setTemplates(loadJsonArray(MAPPING_TEMPLATES_KEY, []));
@@ -124,6 +155,28 @@ export default function UploadPage() {
     setOffers(loadedOffers);
     setSelectedOfferId(loadedOffers.find((offer) => offer.status === "Active" || offer.status === "Approved")?.id || loadedOffers[0]?.id || "");
   }, []);
+
+  const loadImports = React.useCallback(() => {
+    const params = new URLSearchParams({
+      organization_id: localStorage.getItem("orgId") || "org_demo",
+      environment: currentEnvironment(),
+      include_archived: showArchivedImports ? "true" : "false",
+    });
+    fetch(`/api/workflow/import?${params.toString()}`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => {
+        setImports(data.status === "success" ? (data.imports || []) : []);
+        setLifecycleAudit(data.status === "success" ? (data.audit || []) : []);
+      })
+      .catch(() => {
+        setImports([]);
+        setLifecycleAudit([]);
+      });
+  }, [showArchivedImports]);
+
+  useEffect(() => {
+    loadImports();
+  }, [loadImports]);
 
   const headers = data.length ? Object.keys(data[0]) : [];
   const selectedOffer = offers.find((offer) => offer.id === selectedOfferId);
@@ -192,6 +245,63 @@ export default function UploadPage() {
     setTemplates(next);
     localStorage.setItem(MAPPING_TEMPLATES_KEY, JSON.stringify(next));
     notice.info("Mapping template deleted.", "Template deleted");
+  };
+
+  const cancelStagedImport = async () => {
+    if (!lifecycleReason.trim()) {
+      notice.warning("A reason category is required after mapping has begun.", "Reason required");
+      return;
+    }
+    const confirmed = window.confirm("Cancel this staged import? No database import has been saved yet, and no draft will be created.");
+    if (!confirmed) return;
+    const response = await fetch("/api/workflow/import", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "cancel_staged",
+        reason: lifecycleReason,
+        organization_id: localStorage.getItem("orgId") || "org_demo",
+        environment: currentEnvironment(),
+        file_name: fileName,
+        record_count: data.length,
+      }),
+    });
+    const auditResult = await response.json().catch(() => ({}));
+    if (!response.ok || auditResult.status === "error") {
+      notice.error(auditResult.error || "Staged import cancellation could not be audited.", "Cancel failed");
+      return;
+    }
+    setData([]);
+    setResults([]);
+    setFileName("");
+    setFieldMapping({});
+    setCustomFields([]);
+    notice.info("Staged import canceled before database save.", "Import canceled");
+  };
+
+  const updateImportLifecycle = async (batch: ImportBatchSummary, action: "archive" | "restore") => {
+    if (!lifecycleReason.trim()) {
+      notice.warning("A reason category is required.", "Reason required");
+      return;
+    }
+    const response = await fetch("/api/workflow/import", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: batch.id,
+        action,
+        reason: lifecycleReason,
+        organization_id: localStorage.getItem("orgId") || "org_demo",
+        environment: currentEnvironment(),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.status === "error") {
+      notice.error(data.error || "Import lifecycle action failed.", "Import lifecycle failed");
+      return;
+    }
+    notice.success(action === "archive" ? "Completed import archived without rollback or deletion." : "Completed import restored.", action === "archive" ? "Import archived" : "Import restored");
+    loadImports();
   };
 
   const handleGenerate = async () => {
@@ -284,7 +394,10 @@ export default function UploadPage() {
         notice.error(saved.error || "Database import validation failed.", "Database import failed");
         return;
       }
-      if (saved?.status === "success") notice.info(`Saved ${saved.records_saved} records to the ${currentEnvironment()} database.`, "Database saved");
+      if (saved?.status === "success") {
+        notice.info(`Saved ${saved.records_saved} records to the ${currentEnvironment()} database.`, "Database saved");
+        loadImports();
+      }
       if (!saved) notice.warning("Drafts were saved in this browser, but database persistence failed.", "Database warning");
       setIsProcessing(false);
       notice.success(`${generated.length} records imported, validated, and drafted with Brain context.`, "Import complete");
@@ -301,6 +414,64 @@ export default function UploadPage() {
       <div className="flex items-start gap-3 rounded-xl bg-blue-50 border border-blue-100 px-4 py-3">
         <ShieldCheck className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
         <p className="text-sm text-blue-700"><span className="font-semibold">Auto-send OFF:</span> mapped fields, Business Knowledge, App Mindset, and Offer Library feed generation. Human approval is still required.</p>
+      </div>
+
+      <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Completed Imports</h2>
+            <p className="mt-1 text-xs text-slate-500">Archive-only lifecycle controls preserve imported leads, drafts, and audit history.</p>
+          </div>
+          <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <input type="checkbox" checked={showArchivedImports} onChange={(event) => setShowArchivedImports(event.target.checked)} className="rounded border-slate-300 text-indigo-600" />
+            Show archived
+          </label>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-[220px_1fr]">
+          <label className="block">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Lifecycle reason</span>
+            <select value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} className="mt-1 w-full rounded-lg border-slate-200 bg-white text-sm font-semibold text-slate-700">
+              <option value="duplicate">Duplicate import or lead</option>
+              <option value="wrong_source">Wrong file or wrong source</option>
+              <option value="test_demo_cleanup">Test/demo cleanup</option>
+              <option value="bad_source_data">Bad or incomplete source data</option>
+              <option value="out_of_scope">Client/account no longer in scope</option>
+              <option value="compliance_or_dnc">Compliance or do-not-contact concern</option>
+              <option value="operational_correction">Operational correction</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+        </div>
+        <div className="mt-4 divide-y divide-slate-100">
+          {imports.map((batch) => (
+            <div key={batch.id} className="flex items-center justify-between gap-3 py-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">{batch.file_name || "upload.csv"}</p>
+                <p className="text-xs text-slate-500">Batch {batch.id} · {Number(batch.lead_count || batch.total_records || 0)} leads · {batch.created_at || "No timestamp"}</p>
+                {batch.archived_at && <p className="text-xs font-bold text-red-600">Archived · {batch.archive_reason || "reason recorded"}</p>}
+              </div>
+              {batch.archived_at || batch.status === "archived" ? (
+                <button onClick={() => updateImportLifecycle(batch, "restore")} className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100"><RotateCcw className="h-4 w-4" /> Restore</button>
+              ) : (
+                <button onClick={() => updateImportLifecycle(batch, "archive")} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"><Archive className="h-4 w-4" /> Archive</button>
+              )}
+            </div>
+          ))}
+          {!imports.length && <p className="py-4 text-sm text-slate-500">No completed imports available in this environment.</p>}
+        </div>
+        <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-4">
+          <p className="text-xs font-black uppercase tracking-widest text-slate-400">Lifecycle Audit / Reason History</p>
+          <div className="mt-3 space-y-2">
+            {lifecycleAudit.map((event) => (
+              <div key={`${event.action}-${event.target_id}-${event.created_at}`} className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600">
+                <p className="font-bold text-slate-800">{event.action} · {event.metadata?.reason || "reason recorded"}</p>
+                <p>{event.metadata?.previousState || "state"} → {event.metadata?.nextState || "state"} · {event.metadata?.batchId || event.metadata?.leadId || event.target_id}</p>
+                <p className="text-slate-400">{event.created_at}</p>
+              </div>
+            ))}
+            {!lifecycleAudit.length && <p className="text-sm text-slate-500">No lifecycle audit events recorded yet.</p>}
+          </div>
+        </div>
       </div>
 
       {!data.length && (
@@ -334,6 +505,9 @@ export default function UploadPage() {
             </div>
             <button onClick={handleGenerate} disabled={isProcessing || generationBlocked} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md hover:bg-indigo-700 disabled:opacity-60">
               {isProcessing ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</> : <><Zap className="h-4 w-4" /> Validate & Generate Drafts</>}
+            </button>
+            <button onClick={cancelStagedImport} disabled={isProcessing} className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+              Cancel Staged Import
             </button>
           </div>
 
